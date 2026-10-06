@@ -166,8 +166,8 @@ def classify(h: np.ndarray, s: np.ndarray, voda: np.ndarray, bud_na_m: np.ndarra
 
 
 def analyze(xy, s, h, voda, reky, bud_na_m, osm: OsmData, navrh: NavrhoveParametry, ceny: Ceny,
-            stanice_xy: list[tuple[float, float]] | None = None, zastavba_mask: np.ndarray | None = None,
-            chranena_mask: np.ndarray | None = None) -> Analyza:
+            stanice_xy: list[tuple[float, float]] | None = None,
+            zastavba_mask: np.ndarray | None = None) -> Analyza:
     t = classify(h, s, voda, bud_na_m, navrh, ceny)
     line = LineString(xy)
 
