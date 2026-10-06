@@ -127,40 +127,63 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
                                  chranena=vyp.chranena_uzemi, progress=lambda m: prog(0.2, m))
         varovani += osm.varovani
 
+    Rmin, Rpref = nav.min_polomer(), nav.doporuceny_polomer()
+    tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
+    n_seg = len(body_xy) - 1
+
+    def navrh_osy(cs, f0: float, f1: float):
+        """Koridory všech úseků + směrové řešení."""
+        kor = []
+        var = []
+        for k in range(n_seg):
+            f = f0 + (f1 - f0) * k / n_seg
+            prog(f, f"Hledám koridor {body[k].nazev} → {body[k + 1].nazev} …")
+            sp = corridor.find_segment(cs.cost, grid, body_xy[k], body_xy[k + 1], nav.max_prodlouzeni_pct,
+                                       progress=lambda m, f=f: prog(f, m))
+            if not sp.limit_splnen:
+                var.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev}: limit prodloužení nelze splnit.")
+            kor.append(sp)
+        prog(f1, "Navrhuji směrové řešení (přímé a oblouky) …")
+        o = horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in kor], Rmin, Rpref,
+                                     Lp=nav.delka_nastupiste_m, tol=tol, ds=10.0)
+        return kor, o, var + o.varovani
+
+    def stahni_budovy(oblast, f):
+        """Doplní budovy uvnitř (multi)polygonu ``oblast`` (metrické souřadnice)."""
+        parts = list(getattr(oblast, "geoms", [oblast]))
+        new = [osm.budovy] if len(osm.budovy) else []
+        for i, poly in enumerate(parts):
+            if poly.area < 1e4:
+                continue
+            ex = np.array(poly.exterior.coords)
+            lo, la = to_lonlat(ex[:, 0], ex[:, 1])
+            prog(f, f"Stahuji budovy v koridoru trati ({i + 1}/{len(parts)}) …")
+            new.append(osm_mod.fetch_buildings_corridor(list(zip(lo, la)), lambda m: prog(f, m)))
+        if new:
+            osm.budovy = np.unique(np.vstack(new).round(1), axis=0)
+
     # ------------------------------------------------------ nákladová mapa
     prog(0.3, "Počítám nákladovou mapu (zástavba, terén, voda, chráněná území) …")
     cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy)
+    koridory, osa, var_osa = navrh_osy(cs, 0.35, 0.5)
 
-    # ---------------------------------------------------------- koridory
-    koridory = []
-    n_seg = len(body_xy) - 1
-    for k in range(n_seg):
-        prog(0.35 + 0.25 * k / n_seg, f"Hledám koridor {body[k].nazev} → {body[k + 1].nazev} …")
-        sp = corridor.find_segment(cs.cost, grid, body_xy[k], body_xy[k + 1], nav.max_prodlouzeni_pct,
-                                   progress=lambda m: prog(0.35 + 0.25 * k / n_seg, m))
-        if not sp.limit_splnen:
-            varovani.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev}: limit prodloužení nelze splnit.")
-        koridory.append(sp)
-
-    # -------------------------------------------------------- směrové řešení
-    prog(0.62, "Navrhuji směrové řešení (přímé a oblouky) …")
-    Rmin, Rpref = nav.min_polomer(), nav.doporuceny_polomer()
-    tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
-    osa = horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in koridory], Rmin, Rpref,
-                                   Lp=nav.delka_nastupiste_m, tol=tol, ds=10.0)
-    varovani += osa.varovani
-    line = LineString(osa.xy)
-
-    # budovy v koridoru, pokud nejsou pro celou oblast
+    # budovy nejsou pro celou oblast -> stáhnout v pásu kolem 1. varianty a návrh zopakovat
     if not osm.budovy_kompletni and not vyp.demo:
-        prog(0.66, "Stahuji budovy v koridoru trati …")
-        buf = line.buffer(200).simplify(40)
-        ex = np.array(buf.exterior.coords)
-        lo, la = to_lonlat(ex[:, 0], ex[:, 1])
         try:
-            osm.budovy = osm_mod.fetch_buildings_corridor(list(zip(lo, la)), lambda m: prog(0.66, m))
+            pas1 = LineString(osa.xy).buffer(1200).simplify(150)
+            stahni_budovy(pas1, 0.52)
+            prog(0.56, "Přepočítávám nákladovou mapu s budovami a hledám trasu znovu …")
+            cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy)
+            koridory, osa, var_osa = navrh_osy(cs, 0.57, 0.64)
+            # části nové osy mimo prohledaný pás doplnit
+            pas2 = LineString(osa.xy).buffer(250).simplify(50).difference(pas1.buffer(-50))
+            if not pas2.is_empty and pas2.area > 1e5:
+                stahni_budovy(pas2, 0.66)
         except osm_mod.OverpassError as e:
-            varovani.append(f"{e}. Počet demolic nelze určit.")
+            varovani.append(f"{e}. Budovy nebyly staženy – vyhýbání se domům a počet demolic jsou jen přibližné "
+                            "(podle zástavby).")
+    varovani += var_osa
+    line = LineString(osa.xy)
 
     # ---------------------------------------------------------- niveleta
     prog(0.7, "Optimalizuji niveletu (výškové řešení) …")

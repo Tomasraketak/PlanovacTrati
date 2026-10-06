@@ -189,7 +189,9 @@ with st.sidebar:
         w(vy, "rozliseni_m", "Rozlišení rastru [m]", "select", options=[100.0, 75.0, 50.0, 35.0, 25.0],
           help="100 m = rychlý náhled, 50 m = doporučeno, 25 m = detail (pomalé)")
         w(vy, "demo", "Demo režim (syntetický terén, bez internetu)", "check")
-        w(vy, "stahovat_budovy", "Stahovat budovy v celé oblasti (přesnější, pomalejší)", "check")
+        w(vy, "stahovat_budovy", "Stahovat budovy v celé oblasti (velmi pomalé)", "check",
+          help="Vypnuto: budovy se stáhnou v pásu 1,2 km kolem první varianty trasy a návrh se zopakuje – "
+               "rychlejší a obvykle stejně dobré.")
         w(vy, "chranena_uzemi", "Stahovat chráněná území", "check")
         w(vy, "okraj_km", "Okraj oblasti [km]", min_value=0.0, max_value=30.0, step=1.0)
         w(vy, "tolerance_zjednoduseni_m", "Tolerance zjednodušení osy [m]", min_value=20.0, max_value=1000.0, step=10.0)
@@ -350,7 +352,7 @@ with tabs[0]:
             P.body.reverse()
             st.session_state.body_ver += 1
             st.rerun()
-        if c2.button("↕ Posunout poslední výš", width="stretch", disabled=len(P.body) < 3,
+        if c2.button("↕ Poslední výš", width="stretch", disabled=len(P.body) < 3,
                      help="Přesune poslední bod o jedno místo dopředu"):
             P.body.insert(len(P.body) - 2, P.body.pop())
             st.session_state.body_ver += 1
@@ -412,7 +414,11 @@ with tabs[1]:
         for wmsg in R.varovani:
             st.warning(wmsg)
         with st.spinner("Kreslím mapu …"):
-            components.html(report.build_map(R, fit=False).get_root().render(), height=680)
+            html_mapa = report.build_map(R, fit=False).get_root().render()
+            if hasattr(st, "iframe"):
+                st.iframe(html_mapa, height=680)
+            else:  # starší Streamlit
+                components.html(html_mapa, height=680)
         st.caption(f"Výpočet trval {R.trvani_s:.0f} s · rastr {R.grid.ncols} × {R.grid.nrows} buněk po {R.grid.res:.0f} m "
                    "· v mapě lze přepínat podklady i vrstvy (vpravo nahoře), včetně nákladové mapy.")
 
@@ -456,8 +462,10 @@ with tabs[3]:
             st.dataframe(report.tab_obce(R), hide_index=True, width="stretch", height=300)
             st.subheader("Chráněná území")
             df_ch = report.tab_chranena(R)
-            st.dataframe(df_ch, hide_index=True, width="stretch") if len(df_ch) else st.write("Trať neprotíná "
-                                                                                              "chráněná území.")
+            if len(df_ch):
+                st.dataframe(df_ch, hide_index=True, width="stretch")
+            else:
+                st.write("Trať neprotíná chráněná území.")
             st.subheader("Prodloužení úseků")
             st.dataframe(report.tab_prodlouzeni(R), hide_index=True, width="stretch")
 

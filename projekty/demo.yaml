@@ -74,7 +74,7 @@ vlak:
 vypocet:
   rozliseni_m: 50.0
   demo: true
-  stahovat_budovy: true
+  stahovat_budovy: false
   chranena_uzemi: true
   vlastni_dem: ''
   okraj_km: 5.0

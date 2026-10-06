@@ -130,7 +130,7 @@ class Vypocet:
 
     rozliseni_m: float = 50.0          # velikost buňky rastru (100 = rychle, 25 = detailně)
     demo: bool = False                 # syntetický terén bez stahování dat
-    stahovat_budovy: bool = True       # budovy v celé oblasti (pomalejší, přesnější)
+    stahovat_budovy: bool = False      # budovy v celé oblasti (velmi pomalé); jinak jen v pásu kolem trasy
     chranena_uzemi: bool = True        # stahovat chráněná území
     vlastni_dem: str = ""              # cesta k vlastnímu GeoTIFF (např. DMR 5G), jinak Copernicus
     okraj_km: float = 5.0              # okraj oblasti kolem elipsy přípustných tras

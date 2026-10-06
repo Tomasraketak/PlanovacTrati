@@ -241,7 +241,7 @@ def build_map(r: Result, cost_layer: bool = True, fit: bool = True):
     lon = [p[1] for p in latlon]
     # počáteční zoom z rozsahu trasy (fitBounds v neviditelné záložce nefunguje)
     span = max(max(lon) - min(lon), (max(lat) - min(lat)) * 1.5, 1e-3)
-    zoom = int(np.clip(np.floor(np.log2(360.0 / span * 3.2)), 5, 15))
+    zoom = int(np.clip(np.floor(np.log2(360.0 / span * 2.6)), 5, 15))
     m = folium.Map(location=[(min(lat) + max(lat)) / 2, (min(lon) + max(lon)) / 2], zoom_start=zoom, tiles=None,
                    control_scale=True)
     folium.TileLayer("OpenStreetMap", name="Mapa OSM").add_to(m)

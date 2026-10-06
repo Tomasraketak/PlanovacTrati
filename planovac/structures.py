@@ -14,7 +14,7 @@ from .vertical import option_costs
 
 UROVEN, NASYP, ZAREZ, ESTAKADA, MOST, TUNEL, HLOUBENY = range(7)
 NAZVY = ["v úrovni terénu", "násyp", "zářez", "estakáda", "most", "tunel", "hloubený tunel"]
-BARVY = ["#7f8c8d", "#c0843a", "#8e6c3a", "#c0392b", "#2e86de", "#2c3e50", "#6c5ce7"]
+BARVY = ["#95a5a6", "#e67e22", "#6d4c41", "#e74c3c", "#2e86de", "#2c3e50", "#8e44ad"]
 OBJEKTY = (ESTAKADA, MOST, TUNEL, HLOUBENY)
 
 

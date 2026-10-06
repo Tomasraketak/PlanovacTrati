@@ -48,8 +48,9 @@ Parametry vozidla pro výpočet jízdních dob (výkon, hmotnost, odpory, zrychl
 ### 🖥️ Výpočet a data
 - **Rozlišení rastru**: 100 m = rychlý náhled, **50 m = doporučeno**, 25 m = detail (pomalejší, víc paměti).
 - **Demo režim**: syntetický terén bez internetu.
-- **Stahovat budovy v celé oblasti**: přesnější vyhýbání se samotám; pokud je vypnuto, budovy se stáhnou jen
-  v koridoru výsledné trati (pro počet demolic).
+- **Stahovat budovy v celé oblasti**: standardně vypnuto – program nejdřív najde trasu podle zástavby, pak stáhne
+  budovy v pásu 1,2 km kolem ní a návrh zopakuje už s ohledem na jednotlivé domy. Zapnutí stáhne budovy v celé
+  oblasti (u velkých oblastí trvá desítky minut kvůli limitům Overpass API).
 - **Vlastní DEM**: cesta k GeoTIFF s přesnějším výškovým modelem (např. DMR 5G od ČÚZK).
 
 ## Výsledky
