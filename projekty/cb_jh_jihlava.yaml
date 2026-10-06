@@ -1,0 +1,80 @@
+nazev: VRT České Budějovice – Jindřichův Hradec – Jihlava
+popis: Studie vysokorychlostního spojení jižních Čech a Vysočiny, 200 km/h.
+body:
+- nazev: České Budějovice
+  lat: 48.9745
+  lon: 14.488
+  typ: stanice
+- nazev: Jindřichův Hradec
+  lat: 49.144
+  lon: 15.003
+  typ: stanice
+- nazev: Jihlava
+  lat: 49.4155
+  lon: 15.602
+  typ: stanice
+navrh:
+  rychlost_kmh: 200.0
+  max_sklon_promile: 25.0
+  max_sklon_stanice_promile: 2.0
+  delka_nastupiste_m: 400.0
+  max_prodlouzeni_pct: 20.0
+  prevyseni_mm: 150.0
+  nedostatek_prevyseni_mm: 100.0
+  min_polomer_m: null
+  vyska_nasypu_max_m: 15.0
+  hloubka_zarezu_max_m: 20.0
+  vyska_estakady_min_m: 8.0
+  hloubka_tunelu_min_m: 15.0
+  min_delka_tunelu_m: 300.0
+  min_delka_estakady_m: 60.0
+  sirka_plane_m: 14.0
+  sklon_svahu: 1.5
+  polomer_stanice_m: 2000.0
+vahy:
+  obce: 1.0
+  budovy: 1.0
+  teren: 1.0
+  voda: 1.0
+  chranena_uzemi: 1.0
+  delka: 1.0
+ceny:
+  trat_zaklad_mil_km: 150.0
+  technologie_mil_km: 110.0
+  nasyp_kc_m3: 450.0
+  vykop_kc_m3: 550.0
+  estakada_mil_km: 650.0
+  estakada_prirazka_pct_m: 2.0
+  most_mil_km: 900.0
+  tunel_mil_km: 1300.0
+  portal_mil: 150.0
+  hloubeny_tunel_mil_km: 900.0
+  krizeni_silnice_mil: 60.0
+  krizeni_zeleznice_mil: 120.0
+  stanice_mil: 1200.0
+  koncova_stanice_mil: 2500.0
+  demolice_mil_budova: 8.0
+  pozemky_kc_m2: 300.0
+  projekt_pct: 10.0
+  rezerva_pct: 20.0
+vlak:
+  nazev: Vysokorychlostní jednotka (8 vozů)
+  hmotnost_t: 420.0
+  vykon_kw: 8800.0
+  max_tazna_sila_kn: 300.0
+  max_zrychleni_ms2: 0.8
+  brzdne_zpomaleni_ms2: 0.6
+  max_rychlost_kmh: 320.0
+  odpor_a_kn: 2.6
+  odpor_b_kn: 0.033
+  odpor_c_kn: 0.0006
+  pobyt_stanice_min: 2.0
+  rezerva_pct: 7.0
+vypocet:
+  rozliseni_m: 50.0
+  demo: false
+  stahovat_budovy: true
+  chranena_uzemi: true
+  vlastni_dem: ''
+  okraj_km: 5.0
+  tolerance_zjednoduseni_m: 150.0

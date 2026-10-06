@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "planovac-trati"
+version = "1.0.0"
+description = "Automatický návrh osy vysokorychlostní trati nad výškovým modelem a OpenStreetMap"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+  "numpy>=1.26", "scipy>=1.11", "pandas>=2.1", "pyyaml>=6.0", "requests>=2.31", "pyproj>=3.6",
+  "shapely>=2.0", "rasterio>=1.3.9", "scikit-image>=0.22", "pillow>=10.0", "streamlit>=1.50",
+  "streamlit-folium>=0.22", "folium>=0.17", "plotly>=5.20",
+]
+
+[project.scripts]
+planovac = "planovac.cli:main"
+
+[tool.setuptools]
+packages = ["planovac"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,216 @@
+"""Konfigurace projektu: body trasy, návrhové parametry, váhy, ceny a vozidlo.
+
+Všechny vstupy jsou v jednom objektu :class:`Project`, který lze uložit/načíst
+jako YAML (soubor ve složce ``projekty/``) a editovat v GUI.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import asdict, dataclass, field, fields
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+TYP_STANICE = "stanice"          # vlak zastavuje, okolí obce není penalizováno
+TYP_PRUJEZD = "průjezdní bod"    # trasa musí projít bodem, vlak nezastavuje
+TYPY_BODU = (TYP_STANICE, TYP_PRUJEZD)
+
+
+@dataclass
+class Bod:
+    """Bod trasy – stanice (zastávka) nebo průjezdní bod."""
+
+    nazev: str
+    lat: float
+    lon: float
+    typ: str = TYP_STANICE
+
+    @property
+    def je_stanice(self) -> bool:
+        return self.typ == TYP_STANICE
+
+
+@dataclass
+class NavrhoveParametry:
+    """Technické parametry trati."""
+
+    rychlost_kmh: float = 200.0            # návrhová rychlost
+    max_sklon_promile: float = 25.0        # max. podélný sklon (‰)
+    max_sklon_stanice_promile: float = 2.0  # max. sklon v obvodu zastávky (‰)
+    delka_nastupiste_m: float = 400.0      # délka přímé a vodorovné části ve stanici
+    max_prodlouzeni_pct: float = 20.0      # max. prodloužení úseku proti vzdušné čáře (%)
+    prevyseni_mm: float = 150.0            # max. převýšení koleje D
+    nedostatek_prevyseni_mm: float = 100.0  # max. nedostatek převýšení I
+    min_polomer_m: float | None = None     # ruční přepis min. poloměru (None = vypočítat)
+    vyska_nasypu_max_m: float = 15.0       # nad touto výškou už jen estakáda
+    hloubka_zarezu_max_m: float = 20.0     # pod touto hloubkou už jen tunel
+    vyska_estakady_min_m: float = 8.0      # od této výšky smí být estakáda (volí se levnější)
+    hloubka_tunelu_min_m: float = 15.0     # min. hloubka nivelety pod terénem pro ražený tunel
+    min_delka_tunelu_m: float = 300.0      # kratší tunely se mění na zářez / hloubený tunel
+    min_delka_estakady_m: float = 60.0
+    sirka_plane_m: float = 14.0            # šířka pláně dvoukolejné trati
+    sklon_svahu: float = 1.5               # sklon svahů násypu/zářezu 1:n
+    polomer_stanice_m: float = 2000.0      # okruh kolem stanice bez penalizace zástavby
+
+    def min_polomer(self) -> float:
+        """Minimální poloměr oblouku R = 11,8·V² / (D + I)."""
+        if self.min_polomer_m:
+            return float(self.min_polomer_m)
+        r = 11.8 * self.rychlost_kmh ** 2 / (self.prevyseni_mm + self.nedostatek_prevyseni_mm)
+        return math.ceil(r / 50.0) * 50.0
+
+    def doporuceny_polomer(self) -> float:
+        """Doporučený (komfortní) poloměr – D = 100 mm, I = 60 mm."""
+        r = 11.8 * self.rychlost_kmh ** 2 / 160.0
+        return max(self.min_polomer(), math.ceil(r / 100.0) * 100.0)
+
+    def min_polomer_vertikal(self) -> float:
+        """Minimální poloměr zakružovacího oblouku Rv ≈ 0,35·V²."""
+        return max(2000.0, 0.35 * self.rychlost_kmh ** 2)
+
+
+@dataclass
+class Vahy:
+    """Relativní váhy optimalizace koridoru (1.0 = výchozí, 0 = ignorovat)."""
+
+    obce: float = 1.0          # vyhýbání se zástavbě obcí bez zastávky
+    budovy: float = 1.0        # vyhýbání se jednotlivým budovám (samoty, chaty)
+    teren: float = 1.0         # členitý terén (=> tunely, estakády, velké zemní práce)
+    voda: float = 1.0          # vodní plochy a řeky (=> mosty)
+    chranena_uzemi: float = 1.0  # CHKO, NP, rezervace, Natura 2000
+    delka: float = 1.0         # tlak na co nejkratší trasu
+
+
+@dataclass
+class Ceny:
+    """Jednotkové ceny (Kč, cenová úroveň cca 2025, orientační)."""
+
+    trat_zaklad_mil_km: float = 150.0      # železniční svršek, pražcové podloží, odvodnění
+    technologie_mil_km: float = 110.0      # trakce 25 kV, ETCS L2, GSM-R/FRMCS, napájení
+    nasyp_kc_m3: float = 450.0
+    vykop_kc_m3: float = 550.0
+    estakada_mil_km: float = 650.0         # do výšky 20 m
+    estakada_prirazka_pct_m: float = 2.0   # přirážka za každý metr výšky nad 20 m
+    most_mil_km: float = 900.0             # mosty přes vodní toky a nádrže
+    tunel_mil_km: float = 1300.0           # ražený dvoukolejný tunel
+    portal_mil: float = 150.0              # za každý tunel (2 portály)
+    hloubeny_tunel_mil_km: float = 900.0   # hloubený tunel / galerie
+    krizeni_silnice_mil: float = 60.0      # nadjezd / podjezd
+    krizeni_zeleznice_mil: float = 120.0
+    stanice_mil: float = 1200.0            # mezilehlá stanice / zastávka
+    koncova_stanice_mil: float = 2500.0    # napojení na uzel / koncová stanice
+    demolice_mil_budova: float = 8.0       # výkup + demolice jedné budovy
+    pozemky_kc_m2: float = 300.0
+    projekt_pct: float = 10.0              # projekce, inženýring, průzkumy
+    rezerva_pct: float = 20.0              # rezerva na nepředvídané náklady
+
+
+@dataclass
+class Vlak:
+    """Parametry vozidla pro simulaci jízdy (výchozí: 8vozová VRT jednotka)."""
+
+    nazev: str = "Vysokorychlostní jednotka (8 vozů)"
+    hmotnost_t: float = 420.0
+    vykon_kw: float = 8800.0
+    max_tazna_sila_kn: float = 300.0
+    max_zrychleni_ms2: float = 0.8
+    brzdne_zpomaleni_ms2: float = 0.6
+    max_rychlost_kmh: float = 320.0
+    odpor_a_kn: float = 2.6        # Davisova rovnice R = A + B·v + C·v²  (v v km/h)
+    odpor_b_kn: float = 0.033
+    odpor_c_kn: float = 0.00060
+    pobyt_stanice_min: float = 2.0
+    rezerva_pct: float = 7.0       # přirážka k jízdní době (provozní rezerva)
+
+
+@dataclass
+class Vypocet:
+    """Nastavení výpočtu."""
+
+    rozliseni_m: float = 50.0          # velikost buňky rastru (100 = rychle, 25 = detailně)
+    demo: bool = False                 # syntetický terén bez stahování dat
+    stahovat_budovy: bool = True       # budovy v celé oblasti (pomalejší, přesnější)
+    chranena_uzemi: bool = True        # stahovat chráněná území
+    vlastni_dem: str = ""              # cesta k vlastnímu GeoTIFF (např. DMR 5G), jinak Copernicus
+    okraj_km: float = 5.0              # okraj oblasti kolem elipsy přípustných tras
+    tolerance_zjednoduseni_m: float = 150.0  # tolerance Douglas–Peucker pro vrcholy oblouků
+
+
+@dataclass
+class Project:
+    """Celý projekt trati."""
+
+    nazev: str = "Nová trať"
+    popis: str = ""
+    body: list[Bod] = field(default_factory=list)
+    navrh: NavrhoveParametry = field(default_factory=NavrhoveParametry)
+    vahy: Vahy = field(default_factory=Vahy)
+    ceny: Ceny = field(default_factory=Ceny)
+    vlak: Vlak = field(default_factory=Vlak)
+    vypocet: Vypocet = field(default_factory=Vypocet)
+
+    # ------------------------------------------------------------------ I/O
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "Project":
+        d = dict(d or {})
+
+        def build(dc, data):
+            data = data or {}
+            names = {f.name for f in fields(dc)}
+            return dc(**{k: v for k, v in data.items() if k in names})
+
+        body = [build(Bod, b) for b in d.get("body", [])]
+        return cls(
+            nazev=d.get("nazev", "Nová trať"),
+            popis=d.get("popis", ""),
+            body=body,
+            navrh=build(NavrhoveParametry, d.get("navrh")),
+            vahy=build(Vahy, d.get("vahy")),
+            ceny=build(Ceny, d.get("ceny")),
+            vlak=build(Vlak, d.get("vlak")),
+            vypocet=build(Vypocet, d.get("vypocet")),
+        )
+
+    def to_yaml(self) -> str:
+        return yaml.safe_dump(self.to_dict(), allow_unicode=True, sort_keys=False)
+
+    @classmethod
+    def from_yaml(cls, text: str) -> "Project":
+        return cls.from_dict(yaml.safe_load(text))
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(self.to_yaml(), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Project":
+        return cls.from_yaml(Path(path).read_text(encoding="utf-8"))
+
+    # ------------------------------------------------------------ validace
+    def validate(self) -> list[str]:
+        """Vrátí seznam chyb (prázdný = v pořádku)."""
+        err = []
+        if len(self.body) < 2:
+            err.append("Trasa potřebuje alespoň 2 body (start a cíl).")
+        for i, b in enumerate(self.body):
+            if not (-90 <= b.lat <= 90 and -180 <= b.lon <= 180):
+                err.append(f"Bod {i + 1} ({b.nazev}) má neplatné souřadnice.")
+            if b.typ not in TYPY_BODU:
+                err.append(f"Bod {i + 1} ({b.nazev}) má neznámý typ '{b.typ}'.")
+        if self.body and not self.body[0].je_stanice:
+            err.append("První bod musí být stanice.")
+        if self.body and not self.body[-1].je_stanice:
+            err.append("Poslední bod musí být stanice.")
+        n = self.navrh
+        if not 40 <= n.rychlost_kmh <= 400:
+            err.append("Návrhová rychlost musí být 40–400 km/h.")
+        if not 1 <= n.max_sklon_promile <= 60:
+            err.append("Max. sklon musí být 1–60 ‰.")
+        if not 0 < n.max_prodlouzeni_pct <= 200:
+            err.append("Max. prodloužení musí být 0–200 %.")
+        if self.vypocet.rozliseni_m < 10:
+            err.append("Rozlišení musí být alespoň 10 m.")
+        return err
