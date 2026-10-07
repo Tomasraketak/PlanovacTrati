@@ -220,7 +220,14 @@ def _q(body: str, timeout: int = 180) -> str:
 
 
 def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progress | None = None) -> OsmData:
-    """Stáhne všechny vrstvy pro obdélník ``bbox`` = (west, south, east, north)."""
+    """Stáhne všechny vrstvy pro obdélník ``bbox`` = (west, south, east, north).
+
+    Obdélník se zaokrouhlí ven na 0,1°, aby drobné změny bodů trasy využily data z cache.
+    """
+    import math
+
+    bbox = (math.floor(bbox[0] * 10) / 10, math.floor(bbox[1] * 10) / 10,
+            math.ceil(bbox[2] * 10) / 10, math.ceil(bbox[3] * 10) / 10)
     b = _bbox_str(bbox)
     osm = OsmData()
 

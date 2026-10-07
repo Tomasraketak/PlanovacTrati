@@ -9,7 +9,7 @@ from typing import Callable
 import numpy as np
 from shapely.geometry import LineString
 
-from . import corridor, costs, dem, horizontal, osm as osm_mod, structures, synthetic, traction, vertical
+from . import corridor, costs, dem, horizontal, omezeni, osm as osm_mod, structures, synthetic, traction, vertical
 from .config import Project
 from .costsurface import CostSurface, build_cost_surface
 from .geo import Grid, to_lonlat, to_xy
@@ -37,6 +37,11 @@ class Result:
     vzdusna_useky_m: list[float]
     varovani: list[str] = field(default_factory=list)
     trvani_s: float = 0.0
+    omezeni: list[omezeni.Usek] = field(default_factory=list)     # úseky se sníženou rychlostí
+    omezeni_protokol: list[str] = field(default_factory=list)
+    zaklad_cena_mil: float = 0.0          # cena varianty bez úseků se sníženou rychlostí
+    zaklad_demolice: int = 0
+    porovnani_vlaku: list[traction.PorovnaniVlaku] = field(default_factory=list)
 
     # ----------------------------------------------------------- souhrny
     @property
@@ -183,32 +188,52 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             varovani.append(f"{e}. Budovy nebyly staženy – vyhýbání se domům a počet demolic jsou jen přibližné "
                             "(podle zástavby).")
     varovani += var_osa
-    line = LineString(osa.xy)
-
-    # ---------------------------------------------------------- niveleta
-    prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
-    s = osa.s
-    z_ter = grid.sample(z, osa.xy[:, 0], osa.xy[:, 1]).astype(float)
-    voda, reky = structures.water_flags(line, s, osm)
-    bud = structures.building_density(osa.xy, s, osm.budovy)
-    st_s = [bs for bs, js in zip(osa.body_s, je_stanice) if js]
-    z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny)
-    h = z_rail - z_ter
-
-    # ---------------------------------------------------------- analýza
-    prog(0.85, "Klasifikuji stavby, demolice a křížení …")
-    rr, cc = grid.rowcol(osa.xy[:, 0], osa.xy[:, 1])
-    zast_mask = cs.zastavba[rr, cc] & (cs.stanice_vyjimka[rr, cc] < 0.5)
-    an = structures.analyze(osa.xy, s, h, voda, reky, bud, osm, nav, project.ceny,
-                            stanice_xy=stanice_xy, zastavba_mask=zast_mask)
-
-    prog(0.9, "Počítám rozpočet …")
+    demol_mil = project.vahy.demolice_optimalizace_mil(project.ceny)
+    nazvy = [b.nazev for b in body]
     n_st = sum(je_stanice)
-    rozp = costs.estimate(osa.delka, s, h, an, max(n_st - 2, 0), 2, project.ceny)
 
-    prog(0.94, "Simuluji jízdu vlaku …")
-    jizda = traction.compute(s, z_rail, osa.krivost, osa.body_s, [b.nazev for b in body], je_stanice, nav,
-                             project.vlak)
+    def vyhodnot(o: horizontal.Alignment) -> omezeni.Varianta:
+        """Niveleta + stavby + rozpočet + jízdní doba pro danou osu."""
+        line = LineString(o.xy)
+        s = o.s
+        z_ter = grid.sample(z, o.xy[:, 0], o.xy[:, 1]).astype(float)
+        voda, reky = structures.water_flags(line, s, osm)
+        bud = structures.building_density(o.xy, s, osm.budovy)
+        st_s = [bs for bs, js in zip(o.body_s, je_stanice) if js]
+        z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny, demolice_mil=demol_mil)
+        h = z_rail - z_ter
+        rr, cc = grid.rowcol(o.xy[:, 0], o.xy[:, 1])
+        zast_mask = cs.zastavba[rr, cc] & (cs.stanice_vyjimka[rr, cc] < 0.5)
+        an = structures.analyze(o.xy, s, h, voda, reky, bud, osm, nav, project.ceny,
+                                stanice_xy=stanice_xy, zastavba_mask=zast_mask, demolice_mil=demol_mil)
+        rozp = costs.estimate(o.delka, s, h, an, max(n_st - 2, 0), 2, project.ceny)
+        jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak)
+        nd = len(an.demolice_idx)
+        cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil)
+        return omezeni.Varianta(osa=o, cena_mil=rozp.celkem_mil, demolice=nd,
+                                J=rozp.celkem_mil + project.vahy.penalizace_demolice_mil * project.vahy.budovy * nd,
+                                jizdni_doba_s=jizda.celkem_s,
+                                data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda, cena_m=cena_m))
+
+    prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
+    zaklad = vyhodnot(osa)
+    var, useky_omez, protokol = zaklad, [], []
+    if project.omezeni.povolit and project.omezeni.max_pocet > 0:
+        prog(0.76, "Hledám místa, kde by snížená rychlost výrazně ušetřila …")
+
+        def navrhni(zony):
+            return horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in koridory], Rmin, Rpref,
+                                            Lp=nav.delka_nastupiste_m, tol=tol, ds=10.0, zony=zony, ref_xy=osa.xy)
+
+        var, useky_omez, protokol = omezeni.najdi_omezeni(
+            zaklad, [k.xy for k in koridory], zaklad.data["cena_m"], res, nav, project.omezeni, navrhni, vyhodnot,
+            project.vahy.penalizace_demolice_mil, progress=lambda m: prog(0.8, m))
+    osa = var.osa
+    z_ter, z_rail, an, rozp, jizda = (var.data[k] for k in ("z_ter", "z_rail", "an", "rozp", "jizda"))
+
+    prog(0.94, "Porovnávám jízdní doby vlaků …")
+    porovnani = traction.porovnani_vlaku(osa.s, z_rail, osa.krivost, osa.body_s, nazvy, je_stanice, nav,
+                                         project.vlak)
 
     vz_useky = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(body_xy[:-1], body_xy[1:])]
     vz = max(sum(vz_useky), 1.0)
@@ -221,4 +246,6 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     prog(1.0, "Hotovo.")
     return Result(project=project, grid=grid, dem=z, cost=cs, osm=osm, body_xy=body_xy, koridory=koridory, osa=osa,
                   z_teren=z_ter, z_kolej=z_rail, analyza=an, rozpocet=rozp, jizda=jizda, vzdusna_m=vz,
-                  vzdusna_useky_m=vz_useky, varovani=varovani, trvani_s=time.time() - t0)
+                  vzdusna_useky_m=vz_useky, varovani=varovani, trvani_s=time.time() - t0, omezeni=useky_omez,
+                  omezeni_protokol=protokol, zaklad_cena_mil=zaklad.cena_mil, zaklad_demolice=zaklad.demolice,
+                  porovnani_vlaku=porovnani)

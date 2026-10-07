@@ -2,7 +2,7 @@
 
 **Automatický návrh osy vysokorychlostní trati nad výškovým modelem terénu a mapou OpenStreetMap.**
 
-Zadáte stanice (např. *České Budějovice – Jindřichův Hradec – Jihlava*), návrhovou rychlost, maximální sklon,
+Zadáte stanice (např. *České Budějovice – Třeboň – Jindřichův Hradec – Jihlava*), návrhovou rychlost, maximální sklon,
 o kolik % smí být trať delší než vzdušná čára a co je pro vás důležité (málo tunelů a estakád, nebourat domy,
 vyhnout se vesnicím bez zastávky…). Program sám stáhne výškový model a mapová data, **najde optimální trasu**,
 vloží oblouky, navrhne niveletu a spočítá:
@@ -11,7 +11,9 @@ vloží oblouky, navrhne niveletu a spočítá:
 - 🏗️ **statistiku staveb** – kolik a jak dlouhých tunelů, estakád a mostů, objemy zemních prací, demolice budov,
   křížení silnic a železnic, obce u trati, průchod chráněnými územími,
 - 💰 **orientační cenu** po položkách,
-- ⏱️ **jízdní doby** a jízdní řád (simulace jízdy vlaku), rychlostní profil,
+- ⏱️ **jízdní doby** a jízdní řád pro zvolený vlak (**RegioPanter, Railjet, Pendolino, ICE, TGV** nebo vlastní)
+  s reálným zrychlením a brzděním, pobyt v zastávce 90 s, porovnání všech vlaků,
+- 🐢 **úseky se sníženou rychlostí** (max. 4 × 3 km, min. 120 km/h) tam, kde výrazně ušetří nebo zachrání domy,
 - 📈 **podélný profil** a sklony,
 - ⬇️ export do **HTML reportu, GeoJSON, KML (Google Earth), CSV (Excel)**.
 
@@ -111,8 +113,10 @@ Podrobný návod: **[docs/NAVOD.md](docs/NAVOD.md)** (je i přímo v aplikaci na
 | Max. sklon | 25 ‰ | osobní VRT 25–35 ‰, smíšený provoz 12,5–18 ‰ |
 | Max. prodloužení proti vzdušné čáře | 20 % | pro každý úsek mezi sousedními body |
 | Priority | 1,0 | obce, domy, tunely/estakády, voda, chráněná území, délka |
+| Penalizace demolice | +40 mil. Kč/dům | jen pro optimalizaci, do rozpočtu se nepočítá |
+| Snížená rychlost | max. 4 úseky × 3 km, ≥ 120 km/h | použije se při úspoře ≥ 300 mil. Kč nebo ≥ 5 domech |
 | Jednotkové ceny | ČR ~2025 | tunel 1,3 mld./km, estakáda 650 mil./km, … |
-| Vlak | 420 t, 8,8 MW | VRT jednotka, pobyt ve stanici 2 min |
+| Vlak | ICE 3 | na výběr RegioPanter, Railjet, Pendolino, ICE 3, TGV, vlastní; pobyt 90 s |
 | Rozlišení | 50 m | 100 m rychle / 25 m detail |
 
 ## 💻 Příkazová řádka
@@ -127,9 +131,10 @@ planovac.bat novy projekty\moje_trat.yaml                 :: šablona nového pr
 i v Poznámkovém bloku:
 
 ```yaml
-nazev: VRT České Budějovice – Jindřichův Hradec – Jihlava
+nazev: VRT České Budějovice – Třeboň – Jindřichův Hradec – Jihlava
 body:
 - {nazev: České Budějovice, lat: 48.9745, lon: 14.488, typ: stanice}
+- {nazev: Třeboň, lat: 49.0153, lon: 14.7607, typ: stanice}
 - {nazev: Jindřichův Hradec, lat: 49.144, lon: 15.003, typ: stanice}
 - {nazev: Jihlava, lat: 49.4155, lon: 15.602, typ: stanice}
 navrh:
@@ -152,7 +157,9 @@ vahy: {obce: 1.0, budovy: 1.0, teren: 1.0, voda: 1.0, chranena_uzemi: 1.0, delka
 4. **Oblouky** – lomená čára → přímé + kružnicové oblouky s R ≥ R_min, stanice na přímé.
 5. **Niveleta** – dynamické programování najde globálně nejlevnější výškové vedení (násyp / zářez / estakáda /
    tunel / most) při dodržení max. sklonu.
-6. **Analýza** – klasifikace staveb, demolice, křížení, rozpočet, simulace jízdy vlaku.
+6. **Úseky se sníženou rychlostí** – kde osa s velkými oblouky nemůže sledovat koridor, zkusí se na max. 3 km
+   menší oblouky (nižší rychlost); použijí se jen při výrazné úspoře nebo menším počtu demolic.
+7. **Analýza** – klasifikace staveb, demolice, křížení, rozpočet, simulace jízdy vybraného vlaku i porovnání vlaků.
 
 Podrobně: **[docs/ALGORITMUS.md](docs/ALGORITMUS.md)** · Upřesněné zadání a vývojové podmínky:
 **[docs/ZADANI.md](docs/ZADANI.md)**
@@ -170,7 +177,8 @@ planovac/              výpočetní jádro
   vertical.py          niveleta (dynamické programování)
   structures.py        tunely, estakády, mosty, demolice, křížení
   costs.py             rozpočet
-  traction.py          simulace jízdy, jízdní doby
+  traction.py          simulace jízdy, předvolby vlaků, jízdní doby
+  omezeni.py           úseky se sníženou rychlostí
   report.py            mapa, grafy, HTML report, exporty
   pipeline.py, cli.py  orchestrace a příkazová řádka
 projekty/              uložené projekty (YAML)

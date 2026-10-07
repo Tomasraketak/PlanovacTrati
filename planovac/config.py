@@ -80,6 +80,24 @@ class Vahy:
     voda: float = 1.0          # vodní plochy a řeky (=> mosty)
     chranena_uzemi: float = 1.0  # CHKO, NP, rezervace, Natura 2000
     delka: float = 1.0         # tlak na co nejkratší trasu
+    penalizace_demolice_mil: float = 40.0  # společenská „cena“ zbourání domu – jen pro optimalizaci,
+    #                                        do rozpočtu se nezapočítává (násobí se vahou „budovy“)
+
+    def demolice_optimalizace_mil(self, ceny: "Ceny") -> float:
+        """Cena jedné demolice [mil. Kč], se kterou počítá optimalizace (reálná + penalizace)."""
+        return ceny.demolice_mil_budova + self.penalizace_demolice_mil * self.budovy
+
+
+@dataclass
+class Omezeni:
+    """Úseky se sníženou rychlostí, které smí optimalizace použít, když výrazně ušetří."""
+
+    povolit: bool = True
+    max_pocet: int = 4                 # nejvýše tolik úseků na celé trase
+    max_delka_m: float = 3000.0        # nejdelší úsek se sníženou rychlostí
+    min_rychlost_kmh: float = 120.0    # nejnižší dovolená rychlost v úseku
+    min_uspora_mil: float = 300.0      # úsek se použije, ušetří-li alespoň tolik mil. Kč …
+    min_uspora_demolic: int = 5        # … nebo zachrání-li alespoň tolik domů
 
 
 @dataclass
@@ -106,22 +124,60 @@ class Ceny:
     rezerva_pct: float = 20.0              # rezerva na nepředvídané náklady
 
 
+# Předvolby vlaků – orientační veřejně dostupné parametry (hmotnost bez cestujících, trvalý výkon).
+# Davisova rovnice: odpor R = A + B·v + C·v² [kN], v v km/h.
+VLAKY: dict[str, dict] = {
+    "RegioPanter (ČD 640, 3 vozy)": dict(
+        hmotnost_t=156.0, vykon_kw=2040.0, max_tazna_sila_kn=180.0, max_rychlost_kmh=160.0,
+        max_zrychleni_ms2=1.0, brzdne_zpomaleni_ms2=0.8, odpor_a_kn=1.6, odpor_b_kn=0.016, odpor_c_kn=0.00030,
+        nedostatek_prevyseni_mm=0.0),
+    "Railjet (Taurus + 7 vozů)": dict(
+        hmotnost_t=440.0, vykon_kw=6400.0, max_tazna_sila_kn=300.0, max_rychlost_kmh=230.0,
+        max_zrychleni_ms2=0.45, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=4.5, odpor_b_kn=0.040, odpor_c_kn=0.00075,
+        nedostatek_prevyseni_mm=0.0),
+    "Pendolino (ČD 680, naklápěcí)": dict(
+        hmotnost_t=385.0, vykon_kw=4000.0, max_tazna_sila_kn=210.0, max_rychlost_kmh=230.0,
+        max_zrychleni_ms2=0.5, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=3.5, odpor_b_kn=0.030, odpor_c_kn=0.00060,
+        nedostatek_prevyseni_mm=270.0),
+    "ICE 3 (8 vozů)": dict(
+        hmotnost_t=435.0, vykon_kw=8000.0, max_tazna_sila_kn=300.0, max_rychlost_kmh=320.0,
+        max_zrychleni_ms2=0.6, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=4.0, odpor_b_kn=0.035, odpor_c_kn=0.00050,
+        nedostatek_prevyseni_mm=0.0),
+    "TGV Euroduplex (2+8)": dict(
+        hmotnost_t=424.0, vykon_kw=9280.0, max_tazna_sila_kn=220.0, max_rychlost_kmh=320.0,
+        max_zrychleni_ms2=0.5, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=3.5, odpor_b_kn=0.030, odpor_c_kn=0.00055,
+        nedostatek_prevyseni_mm=0.0),
+}
+VLAK_VLASTNI = "vlastní"
+VLAK_VYCHOZI = "ICE 3 (8 vozů)"
+
+
 @dataclass
 class Vlak:
-    """Parametry vozidla pro simulaci jízdy (výchozí: 8vozová VRT jednotka)."""
+    """Parametry vozidla pro simulaci jízdy (výchozí: ICE 3)."""
 
-    nazev: str = "Vysokorychlostní jednotka (8 vozů)"
-    hmotnost_t: float = 420.0
-    vykon_kw: float = 8800.0
+    nazev: str = VLAK_VYCHOZI          # název předvolby z VLAKY, nebo vlastní název
+    hmotnost_t: float = 435.0
+    vykon_kw: float = 8000.0
     max_tazna_sila_kn: float = 300.0
-    max_zrychleni_ms2: float = 0.8
-    brzdne_zpomaleni_ms2: float = 0.6
+    max_zrychleni_ms2: float = 0.6
+    brzdne_zpomaleni_ms2: float = 0.7
     max_rychlost_kmh: float = 320.0
-    odpor_a_kn: float = 2.6        # Davisova rovnice R = A + B·v + C·v²  (v v km/h)
-    odpor_b_kn: float = 0.033
-    odpor_c_kn: float = 0.00060
-    pobyt_stanice_min: float = 2.0
+    odpor_a_kn: float = 4.0        # Davisova rovnice R = A + B·v + C·v²  (v v km/h)
+    odpor_b_kn: float = 0.035
+    odpor_c_kn: float = 0.00050
+    nedostatek_prevyseni_mm: float = 0.0  # 0 = podle návrhu trati; naklápěcí vlaky víc (rychleji v obloucích)
+    pobyt_stanice_s: float = 90.0
     rezerva_pct: float = 7.0       # přirážka k jízdní době (provozní rezerva)
+
+    @classmethod
+    def z_predvolby(cls, nazev: str, **kw) -> "Vlak":
+        return cls(nazev=nazev, **{**VLAKY[nazev], **kw})
+
+    def nastav_predvolbu(self, nazev: str) -> None:
+        self.nazev = nazev
+        for k, v in VLAKY[nazev].items():
+            setattr(self, k, v)
 
 
 @dataclass
@@ -148,6 +204,7 @@ class Project:
     vahy: Vahy = field(default_factory=Vahy)
     ceny: Ceny = field(default_factory=Ceny)
     vlak: Vlak = field(default_factory=Vlak)
+    omezeni: Omezeni = field(default_factory=Omezeni)
     vypocet: Vypocet = field(default_factory=Vypocet)
 
     # ------------------------------------------------------------------ I/O
@@ -164,6 +221,9 @@ class Project:
             return dc(**{k: v for k, v in data.items() if k in names})
 
         body = [build(Bod, b) for b in d.get("body", [])]
+        vlak_d = dict(d.get("vlak") or {})
+        if "pobyt_stanice_min" in vlak_d and "pobyt_stanice_s" not in vlak_d:  # starší projekty
+            vlak_d["pobyt_stanice_s"] = float(vlak_d.pop("pobyt_stanice_min")) * 60
         return cls(
             nazev=d.get("nazev", "Nová trať"),
             popis=d.get("popis", ""),
@@ -171,7 +231,8 @@ class Project:
             navrh=build(NavrhoveParametry, d.get("navrh")),
             vahy=build(Vahy, d.get("vahy")),
             ceny=build(Ceny, d.get("ceny")),
-            vlak=build(Vlak, d.get("vlak")),
+            vlak=build(Vlak, vlak_d),
+            omezeni=build(Omezeni, d.get("omezeni")),
             vypocet=build(Vypocet, d.get("vypocet")),
         )
 

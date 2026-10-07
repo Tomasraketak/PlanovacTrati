@@ -18,7 +18,7 @@ VARIANTY = ("násyp/zářez", "estakáda", "tunel", "most")
 
 
 def option_costs(h: np.ndarray, navrh: NavrhoveParametry, ceny: Ceny, voda: bool | np.ndarray = False,
-                 budovy_na_m: float | np.ndarray = 0.0) -> np.ndarray:
+                 budovy_na_m: float | np.ndarray = 0.0, demolice_mil: float | None = None) -> np.ndarray:
     """Cena [Kč/m] jednotlivých variant pro výšky ``h``; tvar (4, *h.shape), nepřípustné = inf."""
     h = np.asarray(h, dtype=np.float64)
     voda = np.broadcast_to(np.asarray(voda, dtype=bool), h.shape)
@@ -28,7 +28,8 @@ def option_costs(h: np.ndarray, navrh: NavrhoveParametry, ceny: Ceny, voda: bool
     area = ah * (b + n * ah)
     zem = np.where(h >= 0, area * ceny.nasyp_kc_m3, area * ceny.vykop_kc_m3)
     zem = zem + (b + 2 * n * ah + 6.0) * ceny.pozemky_kc_m2
-    demol = bud * ceny.demolice_mil_budova * 1e6
+    # cena demolice pro optimalizaci = výkup + společenská penalizace (viz Vahy.penalizace_demolice_mil)
+    demol = bud * (ceny.demolice_mil_budova if demolice_mil is None else demolice_mil) * 1e6
     zem = zem + demol
     zem_ok = (h <= navrh.vyska_nasypu_max_m) & (h >= -navrh.hloubka_zarezu_max_m) & ~voda
     estak = ceny.estakada_mil_km * 1000.0 * (1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - 20.0, 0))
@@ -51,8 +52,8 @@ def option_costs(h: np.ndarray, navrh: NavrhoveParametry, ceny: Ceny, voda: bool
     return out
 
 
-def best_cost(h, navrh, ceny, voda=False, budovy_na_m=0.0) -> np.ndarray:
-    return option_costs(h, navrh, ceny, voda, budovy_na_m).min(axis=0)
+def best_cost(h, navrh, ceny, voda=False, budovy_na_m=0.0, demolice_mil=None) -> np.ndarray:
+    return option_costs(h, navrh, ceny, voda, budovy_na_m, demolice_mil).min(axis=0)
 
 
 def _resample_flags(s_dense, flag, s_coarse, half):
@@ -75,6 +76,7 @@ def design_profile(
     navrh: NavrhoveParametry,
     ceny: Ceny,
     ds: float = 25.0,
+    demolice_mil: float | None = None,
 ) -> np.ndarray:
     """Vrátí výšku nivelety [m n. m.] ve vzorcích ``s``."""
     L = float(s[-1])
@@ -106,12 +108,12 @@ def design_profile(
     N = len(levels)
 
     D = np.empty((M, N), dtype=np.float32)
-    D[0] = best_cost(levels - zc[0], navrh, ceny, vc[0], bc[0]) * ds / 2
+    D[0] = best_cost(levels - zc[0], navrh, ceny, vc[0], bc[0], demolice_mil) * ds / 2
     for i in range(1, M):
         k = int(min(kmax[i], kmax[i - 1]))
         prev = D[i - 1]
         best = ndimage.minimum_filter1d(prev, size=2 * k + 1, mode="nearest") if k > 0 else prev
-        D[i] = best + best_cost(levels - zc[i], navrh, ceny, vc[i], bc[i]) * ds
+        D[i] = best + best_cost(levels - zc[i], navrh, ceny, vc[i], bc[i], demolice_mil) * ds
     # zpětný průchod
     lev = np.empty(M, dtype=int)
     lev[-1] = int(np.argmin(D[-1]))

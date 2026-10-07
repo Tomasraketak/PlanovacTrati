@@ -64,7 +64,7 @@ def build_cost_surface(
     pen_obce = np.zeros(grid.shape)
     if zast.any():
         dist = ndimage.distance_transform_edt(~zast) * res
-        pen_obce = np.where(zast, 25.0, 6.0 * np.clip(1 - dist / 300.0, 0, 1) ** 2)
+        pen_obce = np.where(zast, 40.0, 8.0 * np.clip(1 - dist / 300.0, 0, 1) ** 2)
 
     # --- jednotlivé budovy (hustota na buňku, vyhlazená)
     pen_bud = np.zeros(grid.shape)
@@ -77,7 +77,7 @@ def build_cost_surface(
         # počet budov na 1 ha zhruba, rozmazáno na šířku tělesa trati
         sigma = max(0.5, 30.0 / res)
         dens = ndimage.gaussian_filter(cnt, sigma) * (2500.0 / (res * res))
-        pen_bud = 4.0 * np.clip(dens, 0, 6)
+        pen_bud = 10.0 * np.clip(dens, 0, 10)
 
     # --- terén: sklon terénu vůči max. sklonu trati + lokální převýšení
     sl = terrain_slope(dem, res)

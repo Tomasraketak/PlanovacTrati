@@ -34,7 +34,9 @@
   okruh kolem stanic bez penalizace zástavby.
 
 ### ⚖️ Priority optimalizace
-Posuvníky 0–5 (1 = výchozí). Např. chcete-li **co nejméně tunelů a estakád**, zvyšte *⛰️ Šetřit tunely…*;
+Posuvníky 0–5 (1 = výchozí). **Penalizace zbourání domu** (výchozí 40 mil. Kč/dům) se přičítá k ceně
+výkupu jen při hledání trasy – trať tak raději zaplatí delší estakádu, tunel či oblouk, než aby bourala. Do
+rozpočtu se nezapočítává. Např. chcete-li **co nejméně tunelů a estakád**, zvyšte *⛰️ Šetřit tunely…*;
 chcete-li **nebourat domy**, zvyšte *🏠 Nebourat domy* a *🏘️ Vyhýbat se obcím*. *📏 Co nejkratší trasa* tlačí
 na přímost.
 
@@ -42,8 +44,19 @@ na přímost.
 Všechny ceny jsou editovatelné (mil. Kč za km / kus, Kč za m³ / m²). Výchozí hodnoty odpovídají řádově
 cenové úrovni ČR ~2025.
 
+### 🐢 Úseky se sníženou rychlostí
+Program smí na celé trati použít nejvýše **4 úseky** (nastavitelné), každý nejvýše **3 km** dlouhý, kde vlak
+pojede pomaleji (nejméně **120 km/h**). V takovém úseku smí být menší oblouky, takže se trať může vyhnout
+vesnici, kopci nebo údolí. Úsek se použije jen tehdy, když **ušetří alespoň 300 mil. Kč** nebo **zachrání
+alespoň 5 domů** (obojí nastavitelné). Na kartě *🏗️ Stavby* je tabulka použitých úseků i protokol, co všechno
+program zkoušel; v mapě jsou žlutě, v grafu rychlosti jako žluté pásy.
+
 ### 🚆 Vlak
-Parametry vozidla pro výpočet jízdních dob (výkon, hmotnost, odpory, zrychlení, brzdění) a pobyt ve stanici.
+Vyberte vlak: **RegioPanter (ČD 640)**, **Railjet**, **Pendolino (ČD 680, naklápěcí – rychleji v obloucích)**,
+**ICE 3**, **TGV Euroduplex**, nebo *vlastní*. Předvolby mají orientační reálné parametry (výkon, hmotnost,
+tažná síla, zrychlení, brzdění, jízdní odpory); lze je upravit v *Parametry vozidla*. Pobyt v každé zastávce je
+výchozích **90 s**. Po výpočtu ukazuje karta *⏱️ Jízdní doby* **porovnání všech vlaků** a jízdní řád pro kterýkoli
+z nich – bez nutnosti přepočítávat trať.
 
 ### 🖥️ Výpočet a data
 - **Rozlišení rastru**: 100 m = rychlý náhled, **50 m = doporučeno**, 25 m = detail (pomalejší, víc paměti).

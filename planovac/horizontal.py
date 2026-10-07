@@ -58,6 +58,7 @@ class _PI:
     fixed: bool = False       # nelze odstranit (koncový bod, okraj nástupiště)
     req_after: float = 0.0    # požadovaná délka přímé za tímto vrcholem
     sym_after: bool = False   # přímá za vrcholem musí být symetrická kolem bodu (nástupiště)
+    rmin: float = 0.0         # minimální poloměr v tomto vrcholu (menší v úseku se sníženou rychlostí)
 
 
 def _unit(v):
@@ -158,27 +159,51 @@ def _fit_radii(pis, Rmin, Rpref):
     return R, delta
 
 
-def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=150.0, ds=10.0) -> Alignment:
+def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=150.0, ds=10.0,
+                  zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None
+                  ) -> Alignment:
+    """Vloží přímé a oblouky do koridorů.
+
+    ``zony`` – úseky se sníženou rychlostí [(s0, s1, Rmin_zóny)] ve staničení osy ``ref_xy``;
+    vrcholy, které na ni padnou do zóny, smí mít oblouk až s poloměrem Rmin_zóny.
+    """
     pis = _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref)
     varovani: list[str] = []
     # odstranit téměř přímé vrcholy
     if len(pis) > 2:
         d0 = _deflections(pis)
         pis = [p for k, p in enumerate(pis) if p.fixed or k in (0, len(pis) - 1) or d0[k] > np.radians(0.05)]
+    for p in pis:
+        p.rmin = Rmin
+    if zony and ref_xy is not None and len(ref_xy) > 1:
+        from shapely.geometry import LineString, Point
+
+        ref = LineString(ref_xy)
+        for p in pis:
+            if p.fixed:
+                continue
+            sp = ref.project(Point(p.xy))
+            for s0, s1, rz in zony:
+                if s0 <= sp <= s1:
+                    p.rmin = min(p.rmin, rz)
+
+    def rmin_arr():
+        return np.array([p.rmin for p in pis])
 
     for _ in range(10 * len(pis) + 10):
         R, delta = _fit_radii(pis, Rmin, Rpref)
-        bad = [k for k in range(1, len(pis) - 1) if delta[k] > 1e-6 and R[k] < Rmin - 1e-6]
+        rm = rmin_arr()
+        bad = [k for k in range(1, len(pis) - 1) if delta[k] > 1e-6 and R[k] < rm[k] - 1e-6]
         if not bad:
             break
-        k = min(bad, key=lambda q: R[q])
+        k = min(bad, key=lambda q: R[q] / rm[q])
         cand = [q for q in (k - 1, k, k + 1) if 0 < q < len(pis) - 1 and not pis[q].fixed]
         if not cand:
             # všechny okolní vrcholy jsou pevné – ponecháme menší poloměr (rychlostní omezení)
             others = [q for q in bad if any(0 < z < len(pis) - 1 and not pis[z].fixed for z in (q - 1, q, q + 1))]
             if not others:
                 break
-            k = min(others, key=lambda q: R[q])
+            k = min(others, key=lambda q: R[q] / rm[q])
             cand = [q for q in (k - 1, k, k + 1) if 0 < q < len(pis) - 1 and not pis[q].fixed]
 
         def dev(q):
@@ -192,8 +217,9 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
         q = min(cand, key=dev)
         pis.pop(q)
     R, delta = _fit_radii(pis, Rmin, Rpref)
+    rm = rmin_arr()
     for k in range(1, len(pis) - 1):
-        if delta[k] > 1e-6 and R[k] < Rmin - 1e-6:
+        if delta[k] > 1e-6 and R[k] < rm[k] - 1e-6:
             varovani.append(
                 f"Oblouk u vrcholu {k} má poloměr jen {R[k]:.0f} m (< {Rmin:.0f} m) – stanice/průjezdní body "
                 "jsou příliš blízko sebe nebo v ostrém úhlu; v oblouku platí snížená rychlost."

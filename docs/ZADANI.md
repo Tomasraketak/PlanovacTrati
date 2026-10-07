@@ -7,7 +7,7 @@ vysokorychlostní trati** mezi zadanými body, spočítá **orientační cenu**,
 staveb** (tunely, estakády, mosty, zemní práce, demolice) a vykreslí **interaktivní mapu** a **podélný profil**.
 Ovládání přes přehledné webové GUI v prohlížeči, výpočet lze spustit i z příkazové řádky.
 
-Typické použití: „Navrhni trať na 200 km/h České Budějovice – Jindřichův Hradec – Jihlava, max. sklon 25 ‰,
+Typické použití: „Navrhni trať na 200 km/h České Budějovice – Třeboň – Jindřichův Hradec – Jihlava, max. sklon 25 ‰,
 co nejméně tunelů a estakád, ať se nebourají domy a trať se vyhýbá obcím bez zastávky, prodloužení proti vzdušné
 čáře max. 20 %.“
 
@@ -24,7 +24,9 @@ co nejméně tunelů a estakád, ať se nebourají domy a trať se vyhýbá obc�
 | | limity násypů/zářezů, od kdy estakáda / tunel | 15 m / 20 m / 8 m / 15 m |
 | Priority | váhy: obce, budovy, terén (tunely+estakády), voda, chráněná území, délka | 1,0 |
 | Ceny | jednotkové ceny všech typů staveb, demolic, pozemků, rezerva | viz `config.py` |
-| Vlak | hmotnost, výkon, tažná síla, odpory, zrychlení, brzdění, pobyt ve stanici, rezerva | VRT jednotka 8 vozů |
+| Vlak | předvolba (RegioPanter, Railjet, Pendolino, ICE 3, TGV) nebo vlastní parametry; pobyt v zastávce, rezerva | ICE 3, 90 s |
+| Snížená rychlost | max. počet a délka úseků, min. rychlost, prahy úspory (mil. Kč / domy) | 4 × 3 km, 120 km/h, 300 mil. / 5 |
+| Demolice | penalizace zbourání domu pro optimalizaci | +40 mil. Kč/dům |
 | Výpočet | rozlišení rastru, demo režim, stahování budov a chráněných území, vlastní DEM | 50 m |
 
 Body se zadávají kliknutím do mapy, vyhledáním názvu (Nominatim) nebo ručně souřadnicemi.
@@ -38,7 +40,8 @@ Body se zadávají kliknutím do mapy, vyhledáním názvu (Nominatim) nebo ruč
    všech objektů se staničením; objemy násypů a výkopů; zábor; počet demolic a budov v pásmu 100 m;
    křížení silnic, železnic a vodních toků; obce v blízkosti trati; průchod chráněnými územími.
 4. **Rozpočet** po položkách + projekce + rezerva, cena celkem a na km.
-5. **Jízdní řád** (příjezd/odjezd), jízdní doby úseků, průměrná rychlost, varianta bez zastavení.
+5. **Jízdní řád** (příjezd/odjezd), jízdní doby úseků, průměrná rychlost, varianta bez zastavení, porovnání 5 vlaků.
+6. **Úseky se sníženou rychlostí** – poloha, rychlost, poloměr, úspora, zachráněné domy, ztráta času.
 6. **Exporty**: HTML report (vše v jednom souboru), GeoJSON, KML (Google Earth, 3D niveleta), CSV profil (Excel),
    projekt YAML, ZIP se vším.
 

@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
 from planovac import __version__
-from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYPY_BODU, Bod, Project
+from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
 
@@ -83,6 +83,8 @@ def w(obj, attr, label, kind="number", **kw):
     elif kind == "select":
         opts = kw.pop("options")
         new = st.selectbox(label, opts, index=opts.index(val) if val in opts else 0, key=key, **kw)
+    elif isinstance(val, int) and not isinstance(val, bool):
+        new = int(st.number_input(label, value=val, key=key, step=1, **kw))
     else:
         new = st.number_input(label, value=float(val), key=key, **kw)
     setattr(obj, attr, new)
@@ -150,6 +152,20 @@ with st.sidebar:
         w(v, "voda", "🌊 Vyhýbat se vodním plochám", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
         w(v, "chranena_uzemi", "🌲 Šetřit chráněná území", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
         w(v, "delka", "📏 Co nejkratší trasa", "slider", min_value=0.1, max_value=5.0, step=0.1, format="%.1f")
+        w(v, "penalizace_demolice_mil", "🏚️ Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
+          step=5.0, help="Přičte se k ceně výkupu jen při hledání trasy (do rozpočtu se nezapočítá). "
+                         "Násobí se posuvníkem „Nebourat domy“.")
+
+    with st.expander("🐢 Úseky se sníženou rychlostí"):
+        o = P.omezeni
+        st.caption("Optimalizace smí na krátkých úsecích snížit rychlost (menší oblouky), když tím výrazně "
+                   "ušetří nebo zachrání domy.")
+        w(o, "povolit", "Povolit úseky se sníženou rychlostí", "check")
+        w(o, "max_pocet", "Max. počet úseků", min_value=0, max_value=10)
+        w(o, "max_delka_m", "Max. délka úseku [m]", min_value=500.0, max_value=10000.0, step=500.0)
+        w(o, "min_rychlost_kmh", "Nejnižší rychlost v úseku [km/h]", min_value=60.0, max_value=300.0, step=10.0)
+        w(o, "min_uspora_mil", "Použít, ušetří-li aspoň [mil. Kč]", min_value=0.0, step=50.0)
+        w(o, "min_uspora_demolic", "…nebo zachrání-li aspoň [domů]", min_value=0, max_value=1000)
 
     with st.expander("💰 Jednotkové ceny"):
         c = P.ceny
@@ -174,15 +190,40 @@ with st.sidebar:
 
     with st.expander("🚆 Vlak a jízdní doby"):
         t = P.vlak
-        w(t, "nazev", "Vozidlo", "text")
-        w(t, "hmotnost_t", "Hmotnost [t]", min_value=50.0, step=10.0)
-        w(t, "vykon_kw", "Výkon [kW]", min_value=500.0, step=100.0)
-        w(t, "max_tazna_sila_kn", "Max. tažná síla [kN]", min_value=50.0, step=10.0)
-        w(t, "max_rychlost_kmh", "Max. rychlost vozidla [km/h]", min_value=60.0, step=10.0)
-        w(t, "max_zrychleni_ms2", "Max. zrychlení [m/s²]", min_value=0.1, max_value=2.0, step=0.05)
-        w(t, "brzdne_zpomaleni_ms2", "Provozní brzdění [m/s²]", min_value=0.1, max_value=2.0, step=0.05)
-        w(t, "pobyt_stanice_min", "Pobyt ve stanici [min]", min_value=0.0, max_value=15.0, step=0.5)
+        moznosti = list(VLAKY) + [VLAK_VLASTNI]
+        akt = t.nazev if t.nazev in VLAKY else VLAK_VLASTNI
+        volba = st.selectbox("Vlak", moznosti, index=moznosti.index(akt), key=f"w{WV}_vlak_volba",
+                             help="Předvolby mají orientační reálné parametry (výkon, hmotnost, zrychlení, brzdění). "
+                                  "Jízdní doby všech vlaků uvidíte po výpočtu na kartě ⏱️ Jízdní doby.")
+        if volba != akt:
+            if volba == VLAK_VLASTNI:
+                t.nazev = "Vlastní vlak"
+            else:
+                t.nastav_predvolbu(volba)
+            st.session_state.widget_ver += 1
+            st.rerun()
+        if volba == VLAK_VLASTNI:
+            w(t, "nazev", "Název vozidla", "text")
+        w(t, "pobyt_stanice_s", "Pobyt v zastávce [s]", min_value=0.0, max_value=900.0, step=10.0)
         w(t, "rezerva_pct", "Přirážka k jízdní době [%]", min_value=0.0, max_value=30.0, step=1.0)
+        with st.popover("Parametry vozidla", width="stretch"):
+            st.caption("Změnou parametru se z předvolby stane vlastní vlak.")
+            puvodni = {k: getattr(t, k) for k in VLAKY.get(t.nazev, {})}
+            w(t, "hmotnost_t", "Hmotnost [t]", min_value=50.0, step=10.0)
+            w(t, "vykon_kw", "Výkon [kW]", min_value=500.0, step=100.0)
+            w(t, "max_tazna_sila_kn", "Max. tažná síla [kN]", min_value=50.0, step=10.0)
+            w(t, "max_rychlost_kmh", "Max. rychlost vozidla [km/h]", min_value=60.0, step=10.0)
+            w(t, "max_zrychleni_ms2", "Max. zrychlení [m/s²]", min_value=0.1, max_value=2.0, step=0.05)
+            w(t, "brzdne_zpomaleni_ms2", "Provozní brzdění [m/s²]", min_value=0.1, max_value=2.0, step=0.05)
+            w(t, "nedostatek_prevyseni_mm", "Nedostatek převýšení [mm] (0 = podle trati)", min_value=0.0,
+              max_value=300.0, step=10.0, help="Naklápěcí vlaky (Pendolino) až 270 mm – projedou oblouky rychleji.")
+            w(t, "odpor_a_kn", "Odpor A [kN]", min_value=0.0, step=0.1, format="%.2f")
+            w(t, "odpor_b_kn", "Odpor B [kN/(km/h)]", min_value=0.0, step=0.001, format="%.4f")
+            w(t, "odpor_c_kn", "Odpor C [kN/(km/h)²]", min_value=0.0, step=0.00001, format="%.5f")
+            if puvodni and any(abs(getattr(t, k) - v) > 1e-9 for k, v in puvodni.items()):
+                t.nazev = f"{t.nazev} (upraveno)"
+                st.session_state.widget_ver += 1
+                st.rerun()
 
     with st.expander("🖥️ Výpočet a data"):
         vy = P.vypocet
@@ -402,9 +443,12 @@ with tabs[1]:
         c = st.columns(4)
         metric(c[0], "Délka trati", f"{S['delka_km']:.1f} km", f"+{S['prodlouzeni_pct']:.1f} % proti vzdušné")
         metric(c[1], "Odhad ceny", f"{S['cena_mld']:.1f} mld. Kč", f"{S['cena_mil_km']:.0f} mil. Kč/km")
-        metric(c[2], "Jízdní doba", fmt_cas(S["jizdni_doba_s"]), f"bez zastavení {fmt_cas(S['express_s'])}")
+        metric(c[2], f"Jízdní doba ({S['vlak'].split(' (')[0]})", fmt_cas(S["jizdni_doba_s"]),
+               f"bez zastavení {fmt_cas(S['express_s'])}")
         metric(c[3], "Průměrná rychlost", f"{S['prumerna_kmh']:.0f} km/h", f"max. sklon {S['max_sklon']:.1f} ‰")
-        c = st.columns(4)
+        c = st.columns(5)
+        metric(c[4], "Snížená rychlost", f"{S['omezeni_ks']} úseků", f"{S['omezeni_km']:.1f} km"
+               + (f" · ušetří {S['omezeni_uspora_mil']:,.0f} mil.".replace(",", " ") if S['omezeni_ks'] else ""))
         metric(c[0], "Tunely", f"{S['tunely_ks'] + S['hloubene_ks']} ks", f"{S['tunely_km'] + S['hloubene_km']:.2f} km")
         metric(c[1], "Estakády a mosty", f"{S['estakady_ks'] + S['mosty_ks']} ks",
                     f"{S['estakady_km'] + S['mosty_km']:.2f} km")
@@ -445,6 +489,15 @@ with tabs[3]:
             st.dataframe(report.tab_useky_typy(R), hide_index=True, width="stretch")
         with c2:
             st.plotly_chart(report.fig_objekty(R), width="stretch", key="pl_objekty")
+        st.subheader("🐢 Úseky se sníženou rychlostí")
+        if R.omezeni:
+            st.dataframe(report.tab_omezeni(R), hide_index=True, width="stretch")
+            st.caption(f"Bez těchto úseků by trať stála {R.zaklad_cena_mil / 1000:.2f} mld. Kč a bouralo by se "
+                       f"{R.zaklad_demolice} budov.")
+        else:
+            st.write("Žádné – snížení rychlosti se nikde dostatečně nevyplatilo (nebo je vypnuto).")
+        with st.expander("Protokol hledání úseků se sníženou rychlostí"):
+            st.text("\n".join(R.omezeni_protokol) or "—")
         st.subheader("Seznam tunelů, estakád a mostů")
         df_o = report.tab_objekty(R)
         if len(df_o):
@@ -485,20 +538,30 @@ with tabs[5]:
     if R is None:
         _no_result()
     else:
+        st.subheader("Porovnání vlaků")
+        st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
+        volby = [c.vlak for c in R.porovnani_vlaku]
+        if R.project.vlak.nazev not in volby:
+            volby = [R.project.vlak.nazev] + volby
+        vyber = st.selectbox("Zobrazit jízdní řád a rychlost pro vlak", volby,
+                             index=volby.index(R.project.vlak.nazev))
+        J = report.jizda_vlaku(R, vyber)
         c = st.columns(3)
-        metric(c[0], "Se všemi zastávkami", fmt_cas(R.jizda.celkem_s))
-        metric(c[1], "Bez zastavení", fmt_cas(R.jizda.express_s))
-        metric(c[2], "Vlak", R.project.vlak.nazev)
+        metric(c[0], "Se všemi zastávkami", fmt_cas(J.celkem_s))
+        metric(c[1], "Bez zastavení", fmt_cas(J.express_s))
+        metric(c[2], "Průměrná rychlost", f"{R.delka_m / 1000 / max(J.celkem_s / 3600, 1e-9):.0f} km/h")
         c1, c2 = st.columns(2)
+        RJ = copy.copy(R)
+        RJ.jizda = J
         with c1:
             st.subheader("Jízdní řád")
-            st.dataframe(report.tab_jizdni_rad(R), hide_index=True, width="stretch")
+            st.dataframe(report.tab_jizdni_rad(RJ), hide_index=True, width="stretch")
         with c2:
             st.subheader("Úseky")
-            st.dataframe(report.tab_useky_jizdy(R), hide_index=True, width="stretch")
-        st.plotly_chart(report.fig_rychlost(R), width="stretch", key="pl_rychlost2")
-        st.caption(f"Jízdní doby obsahují přirážku {R.project.vlak.rezerva_pct:.0f} % a pobyt ve stanici "
-                   f"{R.project.vlak.pobyt_stanice_min:.1f} min.")
+            st.dataframe(report.tab_useky_jizdy(RJ), hide_index=True, width="stretch")
+        st.plotly_chart(report.fig_rychlost(R, J), width="stretch", key="pl_rychlost2")
+        st.caption(f"Jízdní doby obsahují přirážku {R.project.vlak.rezerva_pct:.0f} % a pobyt v každé zastávce "
+                   f"{R.project.vlak.pobyt_stanice_s:.0f} s. Žluté pásy = úseky se sníženou rychlostí.")
 
 with tabs[6]:
     if R is None:

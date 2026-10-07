@@ -72,9 +72,27 @@ ve stanicích srovná do vodorovné a znovu se vynutí max. sklon.
 - **Hluk**: budovy do 100 m od osy mimo tunely.
 - **Křížení**: průsečíky osy se silnicemi, železnicemi a řekami; v tunelu nebo pod estakádou bez nového objektu.
 
+## 7b. Úseky se sníženou rychlostí (`omezeni.py`)
+Plná rychlost vyžaduje velké oblouky, takže osa někde „řízne“ přes obec či kopec místo optimálního koridoru.
+1. **Kandidáti**: okna délky max. 3 km, kde je stavba drahá (cena varianty na metr + demolice nad mediánem)
+   a osa se zároveň odchyluje od koridoru víc než 2 buňky rastru.
+2. Pro každého kandidáta se osa přepočítá s menším minimálním poloměrem jen v okně – pro 120 km/h
+   R = 11,8·120²/(D+I) ≈ 700 m a pro střední rychlost – a celá varianta se znovu vyhodnotí
+   (niveleta, stavby, rozpočet, jízdní doba).
+3. Přijme se, pokud kritérium J = cena + penalizace·demolice klesne a úspora ≥ 300 mil. Kč nebo ≥ 5 domů.
+   Vyšší rychlost má přednost, dá-li ≥ 80 % úspory. Vybere se max. 4 nepřekrývajících se úseků a ověří
+   jejich společný účinek.
+
+Demolice se v optimalizaci (koridor, niveleta, klasifikace, výběr úseků) počítají s **penalizací +40 mil. Kč/dům**
+navíc k ceně výkupu; rozpočet obsahuje jen skutečnou cenu výkupu.
+
 ## 8. Rozpočet a jízdní doby
 - **Rozpočet** (`costs.py`): délky × jednotkové ceny + kubatury + portály + křížení + stanice + demolice +
   pozemky, k tomu projekce (10 %) a rezerva (20 %).
 - **Jízdní doby** (`traction.py`): simulace po 10 m. Rychlostní limit = min(návrhová rychlost, rychlost v oblouku
   `v = √(R·(D+I)/11,8)`, zastavení ve stanicích), rozšířený o délku vlaku. Dopředný průchod = rozjezd
-  (tažná síla `min(F_max, P/v)` − Davisův odpor − sklon), zpětný průchod = brzdění. Přičte se rezerva a pobyty.
+  (tažná síla `min(F_max, P/v)` − Davisův odpor − sklon), zpětný průchod = brzdění. Přičte se rezerva a pobyty (90 s).
+- **Vlaky**: předvolby RegioPanter (160 km/h, 2,0 MW, 156 t), Railjet (230 km/h, 6,4 MW, 440 t), Pendolino
+  (230 km/h, 4 MW, 385 t, naklápění → nedostatek převýšení 270 mm), ICE 3 (320 km/h, 8 MW, 435 t), TGV
+  Euroduplex (320 km/h, 9,3 MW, 424 t). Rychlost vlaku = min(traťová, max. vlaku); jízdní doby se počítají pro
+  všechny předvolby (porovnání).

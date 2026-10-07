@@ -1,9 +1,14 @@
-nazev: VRT České Budějovice – Jindřichův Hradec – Jihlava
-popis: Studie vysokorychlostního spojení jižních Čech a Vysočiny, 200 km/h.
+nazev: VRT České Budějovice – Třeboň – Jindřichův Hradec – Jihlava
+popis: Studie vysokorychlostního spojení jižních Čech a Vysočiny, 200 km/h, zastávka
+  Třeboň (žel. stanice).
 body:
 - nazev: České Budějovice
   lat: 48.9745
   lon: 14.488
+  typ: stanice
+- nazev: Třeboň
+  lat: 49.0153
+  lon: 14.7607
   typ: stanice
 - nazev: Jindřichův Hradec
   lat: 49.144
@@ -38,6 +43,7 @@ vahy:
   voda: 1.0
   chranena_uzemi: 1.0
   delka: 1.0
+  penalizace_demolice_mil: 40.0
 ceny:
   trat_zaklad_mil_km: 150.0
   technologie_mil_km: 110.0
@@ -58,18 +64,26 @@ ceny:
   projekt_pct: 10.0
   rezerva_pct: 20.0
 vlak:
-  nazev: Vysokorychlostní jednotka (8 vozů)
-  hmotnost_t: 420.0
-  vykon_kw: 8800.0
+  nazev: ICE 3 (8 vozů)
+  hmotnost_t: 435.0
+  vykon_kw: 8000.0
   max_tazna_sila_kn: 300.0
-  max_zrychleni_ms2: 0.8
-  brzdne_zpomaleni_ms2: 0.6
+  max_zrychleni_ms2: 0.6
+  brzdne_zpomaleni_ms2: 0.7
   max_rychlost_kmh: 320.0
-  odpor_a_kn: 2.6
-  odpor_b_kn: 0.033
-  odpor_c_kn: 0.0006
-  pobyt_stanice_min: 2.0
+  odpor_a_kn: 4.0
+  odpor_b_kn: 0.035
+  odpor_c_kn: 0.0005
+  nedostatek_prevyseni_mm: 0.0
+  pobyt_stanice_s: 90.0
   rezerva_pct: 7.0
+omezeni:
+  povolit: true
+  max_pocet: 4
+  max_delka_m: 3000.0
+  min_rychlost_kmh: 120.0
+  min_uspora_mil: 300.0
+  min_uspora_demolic: 5
 vypocet:
   rozliseni_m: 50.0
   demo: false

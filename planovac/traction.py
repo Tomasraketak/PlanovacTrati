@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import NavrhoveParametry, Vlak
+from .config import VLAKY, NavrhoveParametry, Vlak
 
 G = 9.81
 ROT = 1.06  # přirážka na rotující hmoty
@@ -37,6 +37,7 @@ class JizdniDoby:
     celkem_s: float             # celková doba vč. pobytů ve stanicích
     express_s: float            # celková doba bez mezilehlých zastavení
     jizdni_rad: list[tuple[str, float, float]]  # (stanice, příjezd s, odjezd s)
+    vlak: str = ""
 
 
 def speed_limit(krivost: np.ndarray, navrh: NavrhoveParametry, vlak: Vlak, ds: float = 10.0,
@@ -48,7 +49,9 @@ def speed_limit(krivost: np.ndarray, navrh: NavrhoveParametry, vlak: Vlak, ds: f
     k = np.abs(krivost)
     with np.errstate(divide="ignore"):
         R = np.where(k > 1e-9, 1.0 / k, np.inf)
-    vc = np.sqrt(R * (navrh.prevyseni_mm + navrh.nedostatek_prevyseni_mm) / 11.8)
+    # naklápěcí vlaky smí mít větší nedostatek převýšení -> projedou oblouk rychleji
+    I = vlak.nedostatek_prevyseni_mm or navrh.nedostatek_prevyseni_mm
+    vc = np.sqrt(R * (navrh.prevyseni_mm + I) / 11.8)
     v = np.minimum(v, vc)
     # omezení musí platit po celé délce vlaku -> rozšíření minim o délku vlaku
     size = max(1, int(round(delka_vlaku_m / ds))) | 1
@@ -105,7 +108,7 @@ def compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParame
     radky = []
     jr = []
     cas = 0.0
-    pobyt = vlak.pobyt_stanice_min * 60
+    pobyt = vlak.pobyt_stanice_s
     for k in range(len(st_s) - 1):
         i0 = int(np.argmin(np.abs(s - st_s[k])))
         i1 = int(np.argmin(np.abs(s - st_s[k + 1])))
@@ -122,7 +125,30 @@ def compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParame
             jr.append((st_n[k + 1], cas, np.nan))
     express = float(te[-1] * rez)
     return JizdniDoby(s=s, v_kmh=v * 3.6, v_express_kmh=ve * 3.6, vlim_kmh=vlim, radky=radky, celkem_s=cas,
-                      express_s=express, jizdni_rad=jr)
+                      express_s=express, jizdni_rad=jr, vlak=vlak.nazev)
+
+
+@dataclass
+class PorovnaniVlaku:
+    vlak: str
+    max_rychlost_kmh: float
+    celkem_s: float          # se všemi zastávkami (vč. pobytů a rezervy)
+    express_s: float         # bez mezilehlých zastavení
+    prumerna_kmh: float
+    jizda: JizdniDoby
+
+
+def porovnani_vlaku(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry,
+                    zaklad: Vlak) -> list[PorovnaniVlaku]:
+    """Jízdní doby pro všechny předvolby vlaků (pobyt a rezerva z ``zaklad``)."""
+    out = []
+    for nazev in VLAKY:
+        v = Vlak.z_predvolby(nazev, pobyt_stanice_s=zaklad.pobyt_stanice_s, rezerva_pct=zaklad.rezerva_pct)
+        j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v)
+        L = (s[-1] - s[0]) / 1000.0
+        out.append(PorovnaniVlaku(nazev, v.max_rychlost_kmh, j.celkem_s, j.express_s,
+                                  L / max(j.celkem_s / 3600, 1e-9), j))
+    return out
 
 
 def fmt_cas(sec: float) -> str:

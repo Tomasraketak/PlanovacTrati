@@ -64,6 +64,11 @@ def souhrn(r: Result) -> dict:
         "min_vyska": float(np.min(r.z_kolej)),
         "max_vyska": float(np.max(r.z_kolej)),
         "trvani_s": r.trvani_s,
+        "omezeni_ks": len(r.omezeni),
+        "omezeni_km": sum(u.delka for u in r.omezeni) / 1000,
+        "omezeni_uspora_mil": r.zaklad_cena_mil - r.rozpocet.celkem_mil,
+        "omezeni_demolic_mene": r.zaklad_demolice - len(an.demolice_idx),
+        "vlak": r.project.vlak.nazev,
     }
 
 
@@ -78,8 +83,18 @@ def souhrn_text(r: Result) -> str:
         f"Estakády: {s['estakady_ks']} ks / {s['estakady_km']:.2f} km, mosty {s['mosty_ks']} ks / {s['mosty_km']:.2f} km",
         f"Demolice budov: {s['demolice']}, budov v pásmu 100 m: {s['hluk_budovy']}",
         f"Max. sklon: {s['max_sklon']:.1f} ‰, nejmenší poloměr oblouku: {s['min_polomer']:.0f} m",
-        f"Jízdní doba (všechny zastávky): {fmt_cas(s['jizdni_doba_s'])}, bez zastavení: {fmt_cas(s['express_s'])}",
+        f"Jízdní doba – {s['vlak']} (všechny zastávky): {fmt_cas(s['jizdni_doba_s'])}, "
+        f"bez zastavení: {fmt_cas(s['express_s'])}",
     ]
+    if r.omezeni:
+        lines.append(f"Úseky se sníženou rychlostí: {s['omezeni_ks']} ks / {s['omezeni_km']:.1f} km "
+                     f"(úspora {s['omezeni_uspora_mil']:,.0f} mil. Kč, o {s['omezeni_demolic_mene']} demolic méně)"
+                     .replace(",", " "))
+        for u in r.omezeni:
+            lines.append(f"  • km {u.s0 / 1000:.1f}–{u.s1 / 1000:.1f}: {u.rychlost_kmh:.0f} km/h (R {u.min_polomer_m:.0f} m)")
+    if r.porovnani_vlaku:
+        lines.append("Jízdní doby podle vlaku (všechny zastávky / bez zastavení):")
+        lines += [f"  • {c.vlak}: {fmt_cas(c.celkem_s)} / {fmt_cas(c.express_s)}" for c in r.porovnani_vlaku]
     if r.varovani:
         lines.append("Varování:")
         lines += [f"  • {w}" for w in r.varovani]
@@ -170,6 +185,28 @@ def tab_oblouky(r: Result) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def tab_omezeni(r: Result) -> pd.DataFrame:
+    return pd.DataFrame([{"Od km": round(u.s0 / 1000, 2), "Do km": round(u.s1 / 1000, 2), "Délka [m]": round(u.delka),
+                          "Rychlost [km/h]": int(u.rychlost_kmh), "Nejmenší poloměr [m]": round(u.min_polomer_m),
+                          "Úspora [mil. Kč]": round(u.uspora_mil), "Demolic méně": u.demolic_mene,
+                          "Ztráta času [s]": round(u.ztrata_casu_s)} for u in r.omezeni])
+
+
+def tab_porovnani_vlaku(r: Result) -> pd.DataFrame:
+    return pd.DataFrame([{"Vlak": c.vlak, "Max. rychlost [km/h]": int(c.max_rychlost_kmh),
+                          "Všechny zastávky": fmt_cas(c.celkem_s), "Bez zastavení": fmt_cas(c.express_s),
+                          "Průměrná rychlost [km/h]": round(c.prumerna_kmh),
+                          "Zvolený": "✔" if c.vlak == r.project.vlak.nazev else ""} for c in r.porovnani_vlaku])
+
+
+def jizda_vlaku(r: Result, nazev: str | None):
+    """Jízdní doby pro vlak ``nazev`` (z porovnání), jinak zvolený vlak projektu."""
+    for c in r.porovnani_vlaku:
+        if c.vlak == nazev:
+            return c.jizda
+    return r.jizda
+
+
 def tab_krizeni(r: Result) -> pd.DataFrame:
     return pd.DataFrame([{"km": round(k.s / 1000, 3), "Druh": k.druh, "Název": k.nazev, "Řešení": k.reseni}
                          for k in r.analyza.krizeni])
@@ -228,6 +265,7 @@ LEGEND_HTML = """
 {rows}
 <div><span style="display:inline-block;width:22px;border-top:2px dashed #555;margin-right:6px;vertical-align:middle"></span>vzdušná čára</div>
 <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#e74c3c;margin:0 8px 0 6px"></span>demolice budovy</div>
+<div><span style="display:inline-block;width:22px;height:8px;background:#f1c40f;opacity:.7;margin-right:6px;vertical-align:middle"></span>snížená rychlost</div>
 </div>
 """
 
@@ -314,6 +352,19 @@ def build_map(r: Result, cost_layer: bool = True, fit: bool = True):
             folium.CircleMarker([b.lat, b.lon], radius=7, color="#2c3e50", fill=True, fill_color="#f1c40f",
                                 fill_opacity=1, tooltip=f"Průjezdní bod: {b.nazev} (km {bs / 1000:.2f})").add_to(m)
 
+    # úseky se sníženou rychlostí
+    if r.omezeni:
+        fg_o = folium.FeatureGroup(f"Snížená rychlost ({len(r.omezeni)})", show=True)
+        for u in r.omezeni:
+            m_ = (s >= u.s0) & (s <= u.s1)
+            seg = [latlon[i] for i in np.flatnonzero(m_)]
+            if len(seg) > 1:
+                folium.PolyLine(seg, color="#f1c40f", weight=14, opacity=0.55,
+                                tooltip=f"🐢 Snížená rychlost {u.rychlost_kmh:.0f} km/h · km {u.s0 / 1000:.1f}–"
+                                        f"{u.s1 / 1000:.1f} · R {u.min_polomer_m:.0f} m · úspora "
+                                        f"{u.uspora_mil:.0f} mil. Kč, demolic o {u.demolic_mene} méně").add_to(fg_o)
+        fg_o.add_to(m)
+
     # demolice
     if len(r.analyza.demolice_idx):
         fg_d = folium.FeatureGroup(f"Demolice ({len(r.analyza.demolice_idx)})", show=True)
@@ -387,14 +438,19 @@ def fig_sklon(r: Result):
     return fig
 
 
-def fig_rychlost(r: Result):
+def fig_rychlost(r: Result, jizda=None):
     import plotly.graph_objects as go
 
-    km = r.jizda.s / 1000
+    j = jizda or r.jizda
+    km = j.s / 1000
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=km, y=r.jizda.vlim_kmh, name="traťová rychlost", line=dict(color="#95a5a6", dash="dot")))
-    fig.add_trace(go.Scatter(x=km, y=r.jizda.v_express_kmh, name="vlak bez zastavení", line=dict(color="#e67e22")))
-    fig.add_trace(go.Scatter(x=km, y=r.jizda.v_kmh, name="vlak zastavující všude", line=dict(color="#2980b9", width=3)))
+    for u in r.omezeni:
+        fig.add_vrect(x0=u.s0 / 1000, x1=u.s1 / 1000, fillcolor="#f1c40f", opacity=0.25, line_width=0,
+                      annotation_text=f"{u.rychlost_kmh:.0f}", annotation_position="top left")
+    fig.add_trace(go.Scatter(x=km, y=j.vlim_kmh, name="dovolená rychlost", line=dict(color="#95a5a6", dash="dot")))
+    fig.add_trace(go.Scatter(x=km, y=j.v_express_kmh, name="bez zastavení", line=dict(color="#e67e22")))
+    fig.add_trace(go.Scatter(x=km, y=j.v_kmh, name=f"{j.vlak or 'vlak'} – všechny zastávky",
+                             line=dict(color="#2980b9", width=3)))
     for b, bs in zip(r.project.body, r.osa.body_s):
         if b.je_stanice:
             fig.add_vline(x=bs / 1000, line=dict(color="#34495e", dash="dot", width=1))
@@ -442,6 +498,13 @@ def to_geojson(r: Result) -> str:
     for b, bs in zip(r.project.body, r.osa.body_s):
         feats.append({"type": "Feature", "properties": {"nazev": b.nazev, "typ": b.typ, "km": round(bs / 1000, 3)},
                       "geometry": {"type": "Point", "coordinates": [b.lon, b.lat]}})
+    for u in r.omezeni:
+        idx = np.flatnonzero((s >= u.s0) & (s <= u.s1))
+        if len(idx) > 1:
+            feats.append({"type": "Feature", "properties": {
+                "typ": "snížená rychlost", "rychlost_kmh": u.rychlost_kmh, "od_km": round(u.s0 / 1000, 3),
+                "do_km": round(u.s1 / 1000, 3), "min_polomer_m": round(u.min_polomer_m)},
+                "geometry": {"type": "LineString", "coordinates": [[latlon[i][1], latlon[i][0]] for i in idx]}})
     if len(r.analyza.demolice_idx):
         pts = r.osm.budovy[r.analyza.demolice_idx]
         lo, la = to_lonlat(pts[:, 0], pts[:, 1])
@@ -549,7 +612,9 @@ min. poloměr {r.project.navrh.min_polomer():.0f} m · vygenerováno {datetime.n
 <section><h2>Souhrn staveb</h2>{tbl(tab_objekty_souhrn(r))}<h3>Rozdělení délky trati</h3>{tbl(tab_useky_typy(r))}</section>
 <section><h2>Seznam objektů</h2>{tbl(tab_objekty(r))}</section>
 <section><h2>Rozpočet (orientační)</h2>{tbl(tab_rozpocet(r))}</section>
-<section><h2>Jízdní řád</h2>{tbl(tab_jizdni_rad(r))}<h3>Úseky</h3>{tbl(tab_useky_jizdy(r))}</section>
+<section><h2>Jízdní řád – {html.escape(r.project.vlak.nazev)}</h2>{tbl(tab_jizdni_rad(r))}<h3>Úseky</h3>{tbl(tab_useky_jizdy(r))}
+<h3>Porovnání vlaků</h3>{tbl(tab_porovnani_vlaku(r))}</section>
+<section><h2>Úseky se sníženou rychlostí</h2>{tbl(tab_omezeni(r))}</section>
 <section><h2>Prodloužení proti vzdušné čáře</h2>{tbl(tab_prodlouzeni(r))}</section>
 <section><h2>Směrové oblouky</h2>{tbl(tab_oblouky(r))}</section>
 <section><h2>Křížení</h2>{tbl(tab_krizeni(r))}</section>
