@@ -51,6 +51,9 @@ cenové úrovni ČR ~2025.
   vede nová osa přesně po ní.
 - Kde osa vede **do 10 m od okraje dálnice, silnice pro motorová vozidla nebo silnice I. třídy**, je stavba
   **o 25 % levnější** (společný koridor).
+- Sleva se počítá vždy přesně na výsledné ose a ovlivňuje i výškové řešení. Volba *Přitahovat trasu k souběhu*
+  zvýhodní stávající přímé tratě a silnice už při hledání koridoru – rastr 50 m ale přesný souběh nezaručí, proto je
+  ve výchozím stavu vypnutá (vyplatí se porovnat obě varianty).
 - Všechny hodnoty jsou nastavitelné. V mapě je souběh zeleně (trať) a tmavě šedě (silnice), sleva je v rozpočtu
   jako samostatná položka a na kartě *🏗️ Stavby* je seznam úseků souběhu.
 

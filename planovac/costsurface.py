@@ -114,7 +114,7 @@ def build_cost_surface(
     )
     # souběh se stávající tratí (bez penalizací, sleva) a se silnicí (sleva)
     soubeh_f = np.ones(grid.shape)
-    if soubeh is not None and soubeh.povolit:
+    if soubeh is not None and soubeh.povolit and soubeh.pritahovat:
         from .soubeh import faktor_rastr
 
         soubeh_f, rail = faktor_rastr(grid, osm, soubeh, navrh.min_polomer())

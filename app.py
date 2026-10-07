@@ -235,6 +235,9 @@ with st.sidebar:
         w(sb, "silnice_vzdalenost_m", "Silnice: osa do [m] od okraje vozovky", min_value=0.0, max_value=100.0,
           step=1.0, help="Dálnice, silnice pro motorová vozidla a silnice I. třídy.")
         w(sb, "silnice_sleva_pct", "Silnice: sleva [%]", min_value=0.0, max_value=100.0, step=5.0)
+        w(sb, "pritahovat", "Přitahovat trasu k souběhu už při hledání koridoru", "check",
+          help="Sleva na výsledné ose platí vždy. Přitahování v rastru 50 m nezaručí přesný souběh (±4 m) "
+               "a trasu se zvýhodněním vedenou podél silnic a tratí přes obce může i zhoršit – zkuste porovnat.")
 
     with st.expander("🚉 Linky – kde vlaky zastavují"):
         stanice_nazvy = [b.nazev for b in P.body if b.je_stanice]

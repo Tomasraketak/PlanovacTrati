@@ -134,6 +134,8 @@ class Soubeh:
     silnice_vzdalenost_m: float = 10.0     # osa do 10 m od okraje vozovky
     silnice_sleva_pct: float = 25.0
     silnice_tridy: str = "motorway,trunk,primary"  # dálnice, silnice pro motorová vozidla, I. třída
+    pritahovat: bool = False               # zvýhodnit souběh už v nákladové mapě (rastr ±4 m nezaručí;
+    #                                        může trasu i zhoršit) – sleva na výsledné ose platí vždy
 
 
 # poloviční šířka vozovky [m] podle třídy OSM (dálnice: jeden směrový pás bývá v OSM samostatná linie)

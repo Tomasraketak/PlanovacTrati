@@ -73,7 +73,8 @@ ve stanicích srovná do vodorovné a znovu se vynutí max. sklon.
 - **Křížení**: průsečíky osy se silnicemi, železnicemi a řekami; v tunelu nebo pod estakádou bez nového objektu.
 
 ## 7a. Souběh se stávající tratí a silnicemi (`soubeh.py`)
-- Nákladová mapa: buňky se stávající kolejí mají cenu ×0,5 a žádné penalizace (zástavba, budovy, chráněná území);
+- Volitelně (*Přitahovat trasu k souběhu*, výchozí vypnuto) nákladová mapa: buňky se sledovatelnou
+  (dost přímou, R ≥ R_min) stávající kolejí mají cenu ×0,5 a žádné penalizace (zástavba, budovy, chráněná území);
   buňky v pásu silnice (osa ± poloviční šířka vozovky + 10 m; dálnice/silnice pro motorová vozidla 6 m, I. třída
   4 m) ×0,75.
 - Rastr 50 m přesnost ±4 m nezachytí, proto se vrcholy koridoru do 1,5 buňky od koleje posunou přesně na kolej.
