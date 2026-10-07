@@ -117,8 +117,13 @@ def build_cost_surface(
     if soubeh is not None and soubeh.povolit:
         from .soubeh import faktor_rastr
 
-        soubeh_f, rail = faktor_rastr(grid, osm, soubeh)
-        cost = np.where(rail, vahy.delka * 1.0 + vahy.teren * pen_teren, cost) * soubeh_f
+        soubeh_f, rail = faktor_rastr(grid, osm, soubeh, navrh.min_polomer())
+        # podél sledovatelné koleje: penalizace snížené (osa půjde po stávajícím tělese), sleva na stavbu
+        # sleva jen na stavební část (délka + terén); penalizace za obce a domy zůstávají,
+        # podél sledovatelné koleje jsou snížené (osa půjde po stávajícím tělese)
+        zakl = vahy.delka * 1.0 + vahy.teren * pen_teren
+        pen = cost - zakl
+        cost = zakl * soubeh_f + np.where(rail, 0.3, 1.0) * pen
     cost = np.maximum(cost, 0.05)
     return CostSurface(cost=cost.astype(np.float64), zastavba=zast, chranena=chran, voda=voda,
                        sklon=sl, stanice_vyjimka=vyjimka, soubeh=soubeh_f)

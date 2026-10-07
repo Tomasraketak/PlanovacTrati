@@ -62,3 +62,15 @@ def test_yaml_linky_kompatibilita():
     assert len(p.linky) == 3 and p.linky[0].vsechny
     q = Project.from_yaml(Project().to_yaml())
     assert q.soubeh.zeleznice_sleva_pct == 50 and q.soubeh.silnice_sleva_pct == 25
+
+
+def test_sledovatelne_koleje_jen_prime_useky():
+    from planovac.soubeh import koleje_sledovatelne
+
+    o = OsmData()
+    t = np.linspace(0, np.pi, 200)
+    klikata = np.column_stack([300 * np.cos(t), 300 * np.sin(t)])          # R = 300 m
+    rovna = np.column_stack([np.linspace(0, 5000, 50), np.full(50, 5000.0)])
+    o.zeleznice = [LineString(klikata), LineString(rovna)]
+    out = koleje_sledovatelne(o, 1900.0)
+    assert len(out) == 1 and out[0].length > 4000

@@ -140,10 +140,12 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
     n_seg = len(body_xy) - 1
 
+    sledovatelne = osm_mod.OsmData(zeleznice=soubeh_mod.koleje_sledovatelne(osm, Rmin))
+
     def prichytit(xy):
         if not project.soubeh.povolit:
             return xy
-        return soubeh_mod.prichytit_ke_koleji(xy, osm, 1.5 * res)
+        return soubeh_mod.prichytit_ke_koleji(xy, sledovatelne, 1.5 * res)
 
     def navrh_osy(cs, f0: float, f1: float):
         """Koridory všech úseků + směrové řešení."""

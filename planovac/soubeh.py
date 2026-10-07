@@ -46,6 +46,37 @@ def koleje(osm: OsmData) -> MultiLineString | None:
     return MultiLineString(lines) if lines else None
 
 
+def koleje_sledovatelne(osm: OsmData, rmin: float, min_delka: float = 500.0, krok: float = 50.0) -> list:
+    """Části stávajících kolejí, které jsou dost přímé (poloměr ≥ ``rmin``), aby je nová trať mohla
+    skutečně sledovat v toleranci ±4 m. Klikaté úseky (průjezdy obcemi) se nezvýhodňují."""
+    from shapely.geometry import LineString
+
+    from .geo import resample_polyline
+
+    out = []
+    for ls in osm.zeleznice:
+        if ls.length < min_delka:
+            continue
+        xy = resample_polyline(np.asarray(ls.coords), krok)
+        if len(xy) < 7:
+            continue
+        k = 3  # body vzdálené 3 kroky (150 m) – poloměr kružnice opsané třem bodům
+        a, b, c = xy[:-2 * k], xy[k:-k], xy[2 * k:]
+        ab = np.hypot(*(b - a).T)
+        bc = np.hypot(*(c - b).T)
+        ca = np.hypot(*(a - c).T)
+        cross = np.abs((b - a)[:, 0] * (c - a)[:, 1] - (b - a)[:, 1] * (c - a)[:, 0])
+        with np.errstate(divide="ignore", invalid="ignore"):
+            R = np.where(cross > 1e-6, ab * bc * ca / (2 * cross), np.inf)
+        ok = np.zeros(len(xy), dtype=bool)
+        ok[k:-k] = R >= rmin
+        idx = np.flatnonzero(np.diff(np.concatenate([[0], ok.astype(int), [0]])))
+        for i0, i1 in zip(idx[::2], idx[1::2]):
+            if (i1 - i0) * krok >= min_delka:
+                out.append(LineString(xy[i0:i1]))
+    return out
+
+
 def silnice_pasy(osm: OsmData, cfg: Soubeh, navic_m: float = 0.0):
     """Pásy podél silnic, ve kterých osa dostane slevu (polygony)."""
     tridy = _tridy(cfg)
@@ -56,8 +87,8 @@ def silnice_pasy(osm: OsmData, cfg: Soubeh, navic_m: float = 0.0):
     return out
 
 
-def faktor_rastr(grid: Grid, osm: OsmData, cfg: Soubeh):
-    """(faktor ceny buňky, maska buněk se stávající kolejí) pro nákladovou mapu."""
+def faktor_rastr(grid: Grid, osm: OsmData, cfg: Soubeh, rmin: float = 0.0):
+    """(faktor ceny buňky, maska buněk se sledovatelnou stávající kolejí) pro nákladovou mapu."""
     from .costsurface import _rasterize
 
     f = np.ones(grid.shape)
@@ -67,7 +98,7 @@ def faktor_rastr(grid: Grid, osm: OsmData, cfg: Soubeh):
     if pasy:
         m = _rasterize(pasy, grid).astype(bool)
         f[m] = 1 - cfg.silnice_sleva_pct / 100.0
-    kol = [ls for ls in osm.zeleznice if ls.length > 0]
+    kol = koleje_sledovatelne(osm, rmin) if rmin > 0 else [ls for ls in osm.zeleznice if ls.length > 0]
     rail = _rasterize(kol, grid).astype(bool) if kol else np.zeros(grid.shape, dtype=bool)
     f[rail] = np.minimum(f[rail], 1 - cfg.zeleznice_sleva_pct / 100.0)
     return f, rail

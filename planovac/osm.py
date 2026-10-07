@@ -325,11 +325,49 @@ def fetch_buildings_bbox(bbox, progress: Progress | None = None, tile_deg: float
     return pts
 
 
-def fetch_buildings_corridor(poly_lonlat: list[tuple[float, float]], progress: Progress | None = None) -> np.ndarray:
-    """Středy budov uvnitř polygonu koridoru (lon, lat)."""
+def _fetch_poly(poly_lonlat, progress, label="budovy v koridoru") -> np.ndarray:
     coords = " ".join(f"{lat:.5f} {lon:.5f}" for lon, lat in poly_lonlat)
     q = f'[out:csv(::lat,::lon;false)][timeout:180];way["building"](poly:"{coords}");out center qt;'
-    return _csv_points(overpass(q, fmt="csv", progress=progress, label="budovy v koridoru"))
+    return _csv_points(overpass(q, fmt="csv", progress=progress, label=label))
+
+
+def fetch_buildings_corridor(poly_lonlat: list[tuple[float, float]], progress: Progress | None = None) -> np.ndarray:
+    """Středy budov uvnitř polygonu koridoru (lon, lat).
+
+    Stažené budovy a pokrytá území se ukládají do ``data/cache/osm/budovy_store.npz``; při dalším
+    výpočtu se ze serveru stahuje jen část polygonu, která ještě pokrytá není.
+    """
+    import shapely
+    from shapely.geometry import Polygon
+
+    lon = np.array([p[0] for p in poly_lonlat])
+    lat = np.array([p[1] for p in poly_lonlat])
+    x, y = to_xy(lon, lat)
+    poly = Polygon(np.column_stack([x, y])).buffer(0)
+    store = cache_dir("osm") / "budovy_store.npz"
+    body = np.zeros((0, 2))
+    pokryto = None
+    if store.exists():
+        try:
+            d = np.load(store, allow_pickle=False)
+            body = d["body"]
+            pokryto = shapely.from_wkb(bytes(d["pokryto"]))
+        except Exception:
+            body, pokryto = np.zeros((0, 2)), None
+    chybi = poly if pokryto is None else poly.difference(pokryto.buffer(-1))
+    casti = [g for g in getattr(chybi, "geoms", [chybi]) if not g.is_empty and g.area > 2e4]
+    for i, g in enumerate(casti):
+        g = g.simplify(30).buffer(20)
+        ex = np.array(g.exterior.coords)
+        glon, glat = to_lonlat(ex[:, 0], ex[:, 1])
+        nove = _fetch_poly(list(zip(glon, glat)), progress, f"budovy v koridoru {i + 1}/{len(casti)}")
+        body = np.unique(np.vstack([body, nove]).round(1), axis=0) if len(nove) else body
+        pokryto = g if pokryto is None else pokryto.union(g)
+        np.savez_compressed(store, body=body, pokryto=np.frombuffer(shapely.to_wkb(pokryto), dtype=np.uint8))
+    if len(body) == 0:
+        return body
+    uvnitr = shapely.contains_xy(poly, body[:, 0], body[:, 1])
+    return body[uvnitr]
 
 
 # ------------------------------------------------------------------ Nominatim
