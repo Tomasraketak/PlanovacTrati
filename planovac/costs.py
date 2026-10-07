@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .config import Ceny
-from .structures import ESTAKADA, HLOUBENY, MOST, TUNEL, Analyza
+from .structures import ESTAKADA, HLOUBENY, MOST, NASYP, TUNEL, UROVEN, ZAREZ, Analyza
 
 
 @dataclass
@@ -28,8 +28,31 @@ class Rozpocet:
     na_km_mil: float
 
 
+def cena_metru(h: np.ndarray, typy: np.ndarray, navrh, ceny: Ceny) -> np.ndarray:
+    """Přímá stavební cena [Kč/m] v každém vzorku osy podle typu úseku (bez stanic a demolic)."""
+    b, n = navrh.sirka_plane_m, navrh.sklon_svahu
+    ah = np.abs(h)
+    area = ah * (b + n * ah)
+    zaklad = (ceny.trat_zaklad_mil_km + ceny.technologie_mil_km) * 1000.0
+    prirazka = 1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - 20.0, 0)
+    zem = np.isin(typy, (UROVEN, NASYP, ZAREZ))
+    c = np.where(zem, np.where(h >= 0, area * ceny.nasyp_kc_m3, area * ceny.vykop_kc_m3)
+                 + (b + 2 * n * ah + 6.0) * ceny.pozemky_kc_m2, 0.0)
+    c = np.where(typy == ESTAKADA, ceny.estakada_mil_km * 1000.0 * prirazka, c)
+    c = np.where(typy == MOST, ceny.most_mil_km * 1000.0 * prirazka, c)
+    c = np.where(typy == TUNEL, ceny.tunel_mil_km * 1000.0, c)
+    c = np.where(typy == HLOUBENY, ceny.hloubeny_tunel_mil_km * 1000.0, c)
+    return zaklad + c
+
+
+def sleva_soubeh(s: np.ndarray, h: np.ndarray, typy: np.ndarray, faktor: np.ndarray, navrh, ceny: Ceny) -> float:
+    """Sleva [mil. Kč] za úseky v souběhu se stávající tratí / silnicí."""
+    ds = np.gradient(s)
+    return float(np.sum((1 - faktor) * cena_metru(h, typy, navrh, ceny) * ds) / 1e6)
+
+
 def estimate(delka_m: float, s: np.ndarray, h: np.ndarray, an: Analyza, n_mezilehlych: int, n_koncovych: int,
-             ceny: Ceny) -> Rozpocet:
+             ceny: Ceny, sleva_mil: float = 0.0) -> Rozpocet:
     km = delka_m / 1000.0
     P: list[Polozka] = []
 
@@ -75,6 +98,8 @@ def estimate(delka_m: float, s: np.ndarray, h: np.ndarray, an: Analyza, n_mezile
     add("Výkup a demolice budov", nd, "ks", ceny.demolice_mil_budova, nd * ceny.demolice_mil_budova)
     add("Výkup pozemků (trvalý zábor)", an.zabor_m2, "m²", ceny.pozemky_kc_m2, an.zabor_m2 * ceny.pozemky_kc_m2 / 1e6)
 
+    if sleva_mil > 0:
+        add("Sleva za souběh se stávající tratí / silnicí", 1, "", -sleva_mil, -sleva_mil)
     prime = sum(p.cena_mil for p in P)
     projekt = prime * ceny.projekt_pct / 100.0
     rezerva = (prime + projekt) * ceny.rezerva_pct / 100.0

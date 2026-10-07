@@ -122,7 +122,9 @@ def find_segment(
     b: tuple[float, float],
     max_prodlouzeni_pct: float,
     progress=None,
+    prichytit=None,
 ) -> SegmentPath:
+    """``prichytit`` – volitelná funkce xy -> xy (např. přichycení vrcholů ke stávající koleji)."""
     ratio = 1.0 + max_prodlouzeni_pct / 100.0
     sub, sl, d = _subgrid(grid, a, b, ratio, margin=3 * grid.res)
     c = cost[sl].copy()
@@ -146,6 +148,8 @@ def find_segment(
         xy[0] = a
         xy[-1] = b
         xy = string_pull(xy, cl, sub)
+        if prichytit is not None:
+            xy = prichytit(xy)
         L = polyline_length(xy)
         cena = sum(_line_cost(c, sub, xy[k], xy[k + 1]) for k in range(len(xy) - 1))
         return xy, L, cena

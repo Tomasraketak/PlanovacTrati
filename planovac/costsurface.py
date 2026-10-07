@@ -26,6 +26,7 @@ class CostSurface:
     voda: np.ndarray            # bool – vodní plocha
     sklon: np.ndarray           # sklon terénu (bezrozměrný)
     stanice_vyjimka: np.ndarray  # 0..1 – 1 = v okolí stanice (bez penalizace zástavby)
+    soubeh: np.ndarray | None = None  # faktor ceny za souběh (1 = bez slevy)
 
 
 def _rasterize(geoms, grid: Grid, value=1, dtype="uint8") -> np.ndarray:
@@ -47,6 +48,7 @@ def build_cost_surface(
     stations_xy: list[tuple[float, float]],
     navrh: NavrhoveParametry,
     vahy: Vahy,
+    soubeh=None,
 ) -> CostSurface:
     res = grid.res
     X, Y = grid.cell_centers()
@@ -110,6 +112,13 @@ def build_cost_surface(
         + vahy.voda * pen_voda
         + vahy.chranena_uzemi * pen_chran
     )
+    # souběh se stávající tratí (bez penalizací, sleva) a se silnicí (sleva)
+    soubeh_f = np.ones(grid.shape)
+    if soubeh is not None and soubeh.povolit:
+        from .soubeh import faktor_rastr
+
+        soubeh_f, rail = faktor_rastr(grid, osm, soubeh)
+        cost = np.where(rail, vahy.delka * 1.0 + vahy.teren * pen_teren, cost) * soubeh_f
     cost = np.maximum(cost, 0.05)
     return CostSurface(cost=cost.astype(np.float64), zastavba=zast, chranena=chran, voda=voda,
-                       sklon=sl, stanice_vyjimka=vyjimka)
+                       sklon=sl, stanice_vyjimka=vyjimka, soubeh=soubeh_f)

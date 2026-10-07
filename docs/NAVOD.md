@@ -44,6 +44,22 @@ na přímost.
 Všechny ceny jsou editovatelné (mil. Kč za km / kus, Kč za m³ / m²). Výchozí hodnoty odpovídají řádově
 cenové úrovni ČR ~2025.
 
+### 🛤️ Souběh se stávající tratí a silnicí
+- Kde osa nové trati vede **do ±4 m od stávající koleje**, využije se stávající těleso a pozemky: stavba je
+  **o 50 % levnější** a v tom místě se nepočítají penalizace za zástavbu, domy ani chráněná území (nic se nebourá).
+  Program vrcholy trasy ležící blízko koleje „přichytí“ přímo na ni, takže na přímých úsecích stávající trati
+  vede nová osa přesně po ní.
+- Kde osa vede **do 10 m od okraje dálnice, silnice pro motorová vozidla nebo silnice I. třídy**, je stavba
+  **o 25 % levnější** (společný koridor).
+- Všechny hodnoty jsou nastavitelné. V mapě je souběh zeleně (trať) a tmavě šedě (silnice), sleva je v rozpočtu
+  jako samostatná položka a na kartě *🏗️ Stavby* je seznam úseků souběhu.
+
+### 🚉 Linky – kde vlaky zastavují
+Linka určuje, ve kterých stanicích vlak zastaví (první a poslední vždy). Výchozí jsou **zastávkový** (všechny
+stanice), **expres** (bez zastavení) a **rychlík** (vybrané stanice). Linky lze přidávat, přejmenovávat a měnit
+jim zastávky; karta *⏱️ Jízdní doby* pak ukazuje **tabulku vlak × linka** a jízdní řád pro zvolenou kombinaci
+(projížděné stanice s časem průjezdu) – bez nového návrhu trati.
+
 ### 🐢 Úseky se sníženou rychlostí
 Program smí na celé trati použít nejvýše **4 úseky** (nastavitelné), každý nejvýše **3 km** dlouhý, kde vlak
 pojede pomaleji (nejméně **120 km/h**). V takovém úseku smí být menší oblouky, takže se trať může vyhnout

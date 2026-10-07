@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import VLAKY, NavrhoveParametry, Vlak
+from .config import VLAKY, Linka, NavrhoveParametry, Vlak
 
 G = 9.81
 ROT = 1.06  # přirážka na rotující hmoty
@@ -36,8 +36,9 @@ class JizdniDoby:
     radky: list[RadekJR]        # úseky mezi stanicemi (vč. rezervy)
     celkem_s: float             # celková doba vč. pobytů ve stanicích
     express_s: float            # celková doba bez mezilehlých zastavení
-    jizdni_rad: list[tuple[str, float, float]]  # (stanice, příjezd s, odjezd s)
+    jizdni_rad: list[tuple[str, float, float, bool]]  # (stanice, příjezd s, odjezd s, zastavuje)
     vlak: str = ""
+    linka: str = ""
 
 
 def speed_limit(krivost: np.ndarray, navrh: NavrhoveParametry, vlak: Vlak, ds: float = 10.0,
@@ -97,35 +98,68 @@ def simulate(s: np.ndarray, z: np.ndarray, vlim_kmh: np.ndarray, stops: list[flo
     return v, t
 
 
-def compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry, vlak: Vlak) -> JizdniDoby:
+def compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry, vlak: Vlak,
+            linka: Linka | None = None) -> JizdniDoby:
+    """Jízdní doby; ``linka`` určuje, ve kterých stanicích vlak zastavuje (None = ve všech)."""
     ds = float(np.median(np.diff(s))) if len(s) > 1 else 10.0
     vlim = speed_limit(krivost, navrh, vlak, ds)
     st_s = [bs for bs, js in zip(body_s, je_stanice) if js]
     st_n = [nm for nm, js in zip(body_nazvy, je_stanice) if js]
-    v, t = simulate(s, z, vlim, st_s, vlak)
+    zastavuje = [k in (0, len(st_s) - 1) or linka is None or linka.zastavuje(st_n[k]) for k in range(len(st_s))]
+    v, t = simulate(s, z, vlim, [x for x, zs in zip(st_s, zastavuje) if zs], vlak)
     ve, te = simulate(s, z, vlim, [st_s[0], st_s[-1]], vlak)
     rez = 1 + vlak.rezerva_pct / 100.0
-    radky = []
-    jr = []
-    cas = 0.0
     pobyt = vlak.pobyt_stanice_s
-    for k in range(len(st_s) - 1):
-        i0 = int(np.argmin(np.abs(s - st_s[k])))
-        i1 = int(np.argmin(np.abs(s - st_s[k + 1])))
-        jd = (t[i1] - t[i0]) * rez
-        L = (s[i1] - s[i0]) / 1000.0
-        radky.append(RadekJR(st_n[k], st_n[k + 1], L, jd, L / max(jd / 3600, 1e-9)))
+    idx = [int(np.argmin(np.abs(s - x))) for x in st_s]
+    jr = []
+    cas_st = []
+    pocet_pobytu = 0
+    for k in range(len(st_s)):
+        base = t[idx[k]] * rez + pobyt * pocet_pobytu
+        cas_st.append(base)
         if k == 0:
-            jr.append((st_n[0], np.nan, 0.0))
-        cas += jd
-        if k + 1 < len(st_s) - 1:
-            jr.append((st_n[k + 1], cas, cas + pobyt))
-            cas += pobyt
+            jr.append((st_n[k], np.nan, 0.0, True))
+        elif k == len(st_s) - 1:
+            jr.append((st_n[k], base, np.nan, True))
+        elif zastavuje[k]:
+            jr.append((st_n[k], base, base + pobyt, True))
+            pocet_pobytu += 1
         else:
-            jr.append((st_n[k + 1], cas, np.nan))
+            jr.append((st_n[k], base, base, False))      # projíždí
+    radky = []
+    zast_idx = [k for k in range(len(st_s)) if zastavuje[k]]
+    for a, b in zip(zast_idx[:-1], zast_idx[1:]):
+        odjezd = jr[a][2]
+        jd = jr[b][1] - odjezd
+        L = (s[idx[b]] - s[idx[a]]) / 1000.0
+        radky.append(RadekJR(st_n[a], st_n[b], L, jd, L / max(jd / 3600, 1e-9)))
+    celkem = jr[-1][1]
     express = float(te[-1] * rez)
-    return JizdniDoby(s=s, v_kmh=v * 3.6, v_express_kmh=ve * 3.6, vlim_kmh=vlim, radky=radky, celkem_s=cas,
-                      express_s=express, jizdni_rad=jr, vlak=vlak.nazev)
+    return JizdniDoby(s=s, v_kmh=v * 3.6, v_express_kmh=ve * 3.6, vlim_kmh=vlim, radky=radky, celkem_s=celkem,
+                      express_s=express, jizdni_rad=jr, vlak=vlak.nazev, linka=linka.nazev if linka else "")
+
+
+@dataclass
+class BunkaMatice:
+    vlak: str
+    linka: str
+    celkem_s: float
+    prumerna_kmh: float
+    pocet_zastaveni: int
+
+
+def matice_jizdnich_dob(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry, zaklad: Vlak,
+                        linky: list[Linka]) -> list[BunkaMatice]:
+    """Jízdní doby pro každý vlak (předvolby) × každou linku."""
+    out = []
+    L = (s[-1] - s[0]) / 1000.0
+    for nazev in VLAKY:
+        v = Vlak.z_predvolby(nazev, pobyt_stanice_s=zaklad.pobyt_stanice_s, rezerva_pct=zaklad.rezerva_pct)
+        for li in linky:
+            j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v, li)
+            nz = sum(1 for x in j.jizdni_rad[1:-1] if x[3])
+            out.append(BunkaMatice(nazev, li.nazev, j.celkem_s, L / max(j.celkem_s / 3600, 1e-9), nz))
+    return out
 
 
 @dataclass

@@ -9,6 +9,7 @@ from typing import Callable
 import numpy as np
 from shapely.geometry import LineString
 
+from . import soubeh as soubeh_mod
 from . import corridor, costs, dem, horizontal, omezeni, osm as osm_mod, structures, synthetic, traction, vertical
 from .config import Project
 from .costsurface import CostSurface, build_cost_surface
@@ -42,6 +43,9 @@ class Result:
     zaklad_cena_mil: float = 0.0          # cena varianty bez úseků se sníženou rychlostí
     zaklad_demolice: int = 0
     porovnani_vlaku: list[traction.PorovnaniVlaku] = field(default_factory=list)
+    soubeh: list[soubeh_mod.UsekSoubehu] = field(default_factory=list)
+    matice: list[traction.BunkaMatice] = field(default_factory=list)   # vlak × linka
+    sleva_soubeh_mil: float = 0.0
 
     # ----------------------------------------------------------- souhrny
     @property
@@ -136,6 +140,11 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
     n_seg = len(body_xy) - 1
 
+    def prichytit(xy):
+        if not project.soubeh.povolit:
+            return xy
+        return soubeh_mod.prichytit_ke_koleji(xy, osm, 1.5 * res)
+
     def navrh_osy(cs, f0: float, f1: float):
         """Koridory všech úseků + směrové řešení."""
         kor = []
@@ -144,7 +153,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             f = f0 + (f1 - f0) * k / n_seg
             prog(f, f"Hledám koridor {body[k].nazev} → {body[k + 1].nazev} …")
             sp = corridor.find_segment(cs.cost, grid, body_xy[k], body_xy[k + 1], nav.max_prodlouzeni_pct,
-                                       progress=lambda m, f=f: prog(f, m))
+                                       progress=lambda m, f=f: prog(f, m), prichytit=prichytit)
             if not sp.limit_splnen:
                 var.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev}: limit prodloužení nelze splnit.")
             kor.append(sp)
@@ -169,7 +178,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
 
     # ------------------------------------------------------ nákladová mapa
     prog(0.3, "Počítám nákladovou mapu (zástavba, terén, voda, chráněná území) …")
-    cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy)
+    cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy, project.soubeh)
     koridory, osa, var_osa = navrh_osy(cs, 0.35, 0.5)
 
     # budovy nejsou pro celou oblast -> stáhnout v pásu kolem 1. varianty a návrh zopakovat
@@ -178,7 +187,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             pas1 = LineString(osa.xy).buffer(1200).simplify(150)
             stahni_budovy(pas1, 0.52)
             prog(0.56, "Přepočítávám nákladovou mapu s budovami a hledám trasu znovu …")
-            cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy)
+            cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy, project.soubeh)
             koridory, osa, var_osa = navrh_osy(cs, 0.57, 0.64)
             # části nové osy mimo prohledaný pás doplnit
             pas2 = LineString(osa.xy).buffer(250).simplify(50).difference(pas1.buffer(-50))
@@ -203,21 +212,27 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         z_ter = grid.sample(z, o.xy[:, 0], o.xy[:, 1]).astype(float)
         voda, reky = structures.water_flags(line, s, osm)
         bud = structures.building_density(o.xy, s, osm.budovy)
+        f_soub, zel, sil = soubeh_mod.faktor_osy(o.xy, osm, project.soubeh)
+        bud = np.where(zel, 0.0, bud)          # na stávající trati se nebourá
         st_s = [bs for bs, js in zip(o.body_s, je_stanice) if js]
-        z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny, demolice_mil=demol_mil)
+        z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny, demolice_mil=demol_mil,
+                                         faktor=f_soub)
         h = z_rail - z_ter
         rr, cc = grid.rowcol(o.xy[:, 0], o.xy[:, 1])
-        zast_mask = cs.zastavba[rr, cc] & (cs.stanice_vyjimka[rr, cc] < 0.5)
+        zast_mask = cs.zastavba[rr, cc] & (cs.stanice_vyjimka[rr, cc] < 0.5) & ~zel
         an = structures.analyze(o.xy, s, h, voda, reky, bud, osm, nav, project.ceny,
-                                stanice_xy=stanice_xy, zastavba_mask=zast_mask, demolice_mil=demol_mil)
-        rozp = costs.estimate(o.delka, s, h, an, max(n_st - 2, 0), 2, project.ceny)
+                                stanice_xy=stanice_xy, zastavba_mask=zast_mask, demolice_mil=demol_mil,
+                                bez_demolic=zel)
+        sleva = costs.sleva_soubeh(s, h, an.typy, f_soub, nav, project.ceny)
+        rozp = costs.estimate(o.delka, s, h, an, max(n_st - 2, 0), 2, project.ceny, sleva_mil=sleva)
         jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak)
         nd = len(an.demolice_idx)
-        cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil)
+        cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil) * f_soub
         return omezeni.Varianta(osa=o, cena_mil=rozp.celkem_mil, demolice=nd,
                                 J=rozp.celkem_mil + project.vahy.penalizace_demolice_mil * project.vahy.budovy * nd,
                                 jizdni_doba_s=jizda.celkem_s,
-                                data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda, cena_m=cena_m))
+                                data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda, cena_m=cena_m,
+                                          soubeh=soubeh_mod.useky(s, zel, sil), sleva=sleva))
 
     prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
     zaklad = vyhodnot(osa)
@@ -234,10 +249,13 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             project.vahy.penalizace_demolice_mil, progress=lambda m: prog(0.8, m))
     osa = var.osa
     z_ter, z_rail, an, rozp, jizda = (var.data[k] for k in ("z_ter", "z_rail", "an", "rozp", "jizda"))
+    useky_soubehu, sleva_soubehu = var.data["soubeh"], var.data["sleva"]
 
     prog(0.94, "Porovnávám jízdní doby vlaků …")
     porovnani = traction.porovnani_vlaku(osa.s, z_rail, osa.krivost, osa.body_s, nazvy, je_stanice, nav,
                                          project.vlak)
+    matice = traction.matice_jizdnich_dob(osa.s, z_rail, osa.krivost, osa.body_s, nazvy, je_stanice, nav,
+                                          project.vlak, project.linky)
 
     vz_useky = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(body_xy[:-1], body_xy[1:])]
     vz = max(sum(vz_useky), 1.0)
@@ -252,4 +270,25 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
                   z_teren=z_ter, z_kolej=z_rail, analyza=an, rozpocet=rozp, jizda=jizda, vzdusna_m=vz,
                   vzdusna_useky_m=vz_useky, varovani=varovani, trvani_s=time.time() - t0, omezeni=useky_omez,
                   omezeni_protokol=protokol, zaklad_cena_mil=zaklad.cena_mil, zaklad_demolice=zaklad.demolice,
-                  porovnani_vlaku=porovnani)
+                  porovnani_vlaku=porovnani, soubeh=useky_soubehu, sleva_soubeh_mil=sleva_soubehu,
+                  matice=matice)
+
+
+def jizda_pro(r: Result, vlak_nazev: str, linka) -> traction.JizdniDoby:
+    """Přepočítá jízdní doby výsledku pro jiný vlak a linku (bez nového návrhu trati)."""
+    from .config import VLAKY, Vlak
+
+    p = r.project
+    v = (Vlak.z_predvolby(vlak_nazev, pobyt_stanice_s=p.vlak.pobyt_stanice_s, rezerva_pct=p.vlak.rezerva_pct)
+         if vlak_nazev in VLAKY else p.vlak)
+    if isinstance(linka, str):
+        linka = next((li for li in p.linky if li.nazev == linka), None)
+    return traction.compute(r.osa.s, r.z_kolej, r.osa.krivost, r.osa.body_s, [b.nazev for b in p.body],
+                            [b.je_stanice for b in p.body], p.navrh, v, linka)
+
+
+def matice_pro(r: Result, linky) -> list[traction.BunkaMatice]:
+    """Matice vlak × linka pro výsledek a (případně upravené) linky."""
+    p = r.project
+    return traction.matice_jizdnich_dob(r.osa.s, r.z_kolej, r.osa.krivost, r.osa.body_s, [b.nazev for b in p.body],
+                                        [b.je_stanice for b in p.body], p.navrh, p.vlak, linky)

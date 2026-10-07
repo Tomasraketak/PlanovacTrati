@@ -80,6 +80,20 @@ omezeni:
   min_rychlost_kmh: 120.0
   min_uspora_mil: 300.0
   min_uspora_demolic: 5
+soubeh:
+  povolit: true
+  zeleznice_tolerance_m: 4.0
+  zeleznice_sleva_pct: 50.0
+  silnice_vzdalenost_m: 10.0
+  silnice_sleva_pct: 25.0
+  silnice_tridy: motorway,trunk,primary
+linky:
+- nazev: Zastávkový (všechny stanice)
+  zastavky: []
+  vsechny: true
+- nazev: Expres (bez zastavení)
+  zastavky: []
+  vsechny: false
 vypocet:
   rozliseni_m: 50.0
   demo: true

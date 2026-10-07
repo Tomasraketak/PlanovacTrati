@@ -27,6 +27,8 @@ co nejméně tunelů a estakád, ať se nebourají domy a trať se vyhýbá obc�
 | Vlak | předvolba (RegioPanter, Railjet, Pendolino, ICE 3, TGV) nebo vlastní parametry; pobyt v zastávce, rezerva | ICE 3, 90 s |
 | Snížená rychlost | max. počet a délka úseků, min. rychlost, prahy úspory (mil. Kč / domy) | 4 × 3 km, 120 km/h, 300 mil. / 5 |
 | Demolice | penalizace zbourání domu pro optimalizaci | +40 mil. Kč/dům |
+| Souběh | tolerance a sleva u stávající trati, vzdálenost a sleva u silnic | ±4 m −50 %, 10 m −25 % |
+| Linky | název, stanice zastavení (zastávkový / expres / vybrané) | 3 linky |
 | Výpočet | rozlišení rastru, demo režim, stahování budov a chráněných území, vlastní DEM | 50 m |
 
 Body se zadávají kliknutím do mapy, vyhledáním názvu (Nominatim) nebo ručně souřadnicemi.

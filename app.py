@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
 from planovac import __version__
-from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Project
+from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
 
@@ -224,6 +224,41 @@ with st.sidebar:
                 t.nazev = f"{t.nazev} (upraveno)"
                 st.session_state.widget_ver += 1
                 st.rerun()
+
+    with st.expander("🛤️ Souběh se stávající tratí a silnicí"):
+        sb = P.soubeh
+        st.caption("Kde nová trať vede těsně podél stávající koleje nebo hlavní silnice, je stavba levnější.")
+        w(sb, "povolit", "Počítat se souběhem", "check")
+        w(sb, "zeleznice_tolerance_m", "Stávající trať: osa do ± [m]", min_value=0.0, max_value=50.0, step=1.0)
+        w(sb, "zeleznice_sleva_pct", "Stávající trať: sleva [%] (bez penalizací a demolic)", min_value=0.0,
+          max_value=100.0, step=5.0)
+        w(sb, "silnice_vzdalenost_m", "Silnice: osa do [m] od okraje vozovky", min_value=0.0, max_value=100.0,
+          step=1.0, help="Dálnice, silnice pro motorová vozidla a silnice I. třídy.")
+        w(sb, "silnice_sleva_pct", "Silnice: sleva [%]", min_value=0.0, max_value=100.0, step=5.0)
+
+    with st.expander("🚉 Linky – kde vlaky zastavují"):
+        stanice_nazvy = [b.nazev for b in P.body if b.je_stanice]
+        st.caption("První a poslední stanice jsou vždy. Jízdní doby všech linek uvidíte na kartě ⏱️ Jízdní doby.")
+        smazat = None
+        for i, li in enumerate(P.linky):
+            with st.container(border=True):
+                li.nazev = st.text_input("Název linky", li.nazev, key=f"w{WV}_linka_n{i}")
+                li.vsechny = st.checkbox("Zastavuje ve všech stanicích", li.vsechny, key=f"w{WV}_linka_v{i}")
+                if not li.vsechny:
+                    mezilehle = stanice_nazvy[1:-1]
+                    li.zastavky = st.multiselect("Zastavuje v (prázdné = expres bez zastavení)", mezilehle,
+                                                 default=[z for z in li.zastavky if z in mezilehle],
+                                                 key=f"w{WV}_linka_z{i}")
+                if st.button("🗑️ Odebrat linku", key=f"w{WV}_linka_x{i}", disabled=len(P.linky) <= 1):
+                    smazat = i
+        if smazat is not None:
+            P.linky.pop(smazat)
+            st.session_state.widget_ver += 1
+            st.rerun()
+        if st.button("➕ Přidat linku", width="stretch"):
+            P.linky.append(Linka(f"Linka {len(P.linky) + 1}", []))
+            st.session_state.widget_ver += 1
+            st.rerun()
 
     with st.expander("🖥️ Výpočet a data"):
         vy = P.vypocet
@@ -446,7 +481,10 @@ with tabs[1]:
         metric(c[2], f"Jízdní doba ({S['vlak'].split(' (')[0]})", fmt_cas(S["jizdni_doba_s"]),
                f"bez zastavení {fmt_cas(S['express_s'])}")
         metric(c[3], "Průměrná rychlost", f"{S['prumerna_kmh']:.0f} km/h", f"max. sklon {S['max_sklon']:.1f} ‰")
-        c = st.columns(5)
+        c = st.columns(6)
+        metric(c[5], "Souběh", f"{S['soubeh_zel_km'] + S['soubeh_sil_km']:.1f} km",
+               f"trať {S['soubeh_zel_km']:.1f} / silnice {S['soubeh_sil_km']:.1f} · −{S['sleva_soubeh_mil']:,.0f} mil."
+               .replace(",", " "))
         metric(c[4], "Snížená rychlost", f"{S['omezeni_ks']} úseků", f"{S['omezeni_km']:.1f} km"
                + (f" · ušetří {S['omezeni_uspora_mil']:,.0f} mil.".replace(",", " ") if S['omezeni_ks'] else ""))
         metric(c[0], "Tunely", f"{S['tunely_ks'] + S['hloubene_ks']} ks", f"{S['tunely_km'] + S['hloubene_km']:.2f} km")
@@ -489,6 +527,12 @@ with tabs[3]:
             st.dataframe(report.tab_useky_typy(R), hide_index=True, width="stretch")
         with c2:
             st.plotly_chart(report.fig_objekty(R), width="stretch", key="pl_objekty")
+        st.subheader("🛤️ Souběh se stávající tratí a silnicemi")
+        if R.soubeh:
+            st.dataframe(report.tab_soubeh(R), hide_index=True, width="stretch")
+            st.caption(f"Sleva za souběh: {R.sleva_soubeh_mil:,.0f} mil. Kč (už započtena v rozpočtu).".replace(",", " "))
+        else:
+            st.write("Trať nikde nevede v souběhu se stávající tratí ani hlavní silnicí.")
         st.subheader("🐢 Úseky se sníženou rychlostí")
         if R.omezeni:
             st.dataframe(report.tab_omezeni(R), hide_index=True, width="stretch")
@@ -538,17 +582,29 @@ with tabs[5]:
     if R is None:
         _no_result()
     else:
-        st.subheader("Porovnání vlaků")
-        st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
-        volby = [c.vlak for c in R.porovnani_vlaku]
+        from planovac.pipeline import jizda_pro, matice_pro
+
+        klic = (id(R), repr([(li.nazev, li.vsechny, tuple(li.zastavky)) for li in P.linky]))
+        if st.session_state.get("matice_klic") != klic:
+            st.session_state.matice = matice_pro(R, P.linky)
+            st.session_state.matice_klic = klic
+        RM = copy.copy(R)
+        RM.matice = st.session_state.matice
+        st.subheader("Jízdní doby: vlak × linka")
+        st.dataframe(report.tab_matice(RM), hide_index=True, width="stretch")
+        st.caption("Linky (kde vlak zastavuje) nastavíte vlevo v „🚉 Linky“ – tabulka se přepočítá hned, "
+                   "bez nového návrhu trati.")
+        volby = list(VLAKY)
         if R.project.vlak.nazev not in volby:
             volby = [R.project.vlak.nazev] + volby
-        vyber = st.selectbox("Zobrazit jízdní řád a rychlost pro vlak", volby,
-                             index=volby.index(R.project.vlak.nazev))
-        J = report.jizda_vlaku(R, vyber)
+        c1, c2 = st.columns(2)
+        vyber = c1.selectbox("Vlak", volby, index=volby.index(R.project.vlak.nazev))
+        lin_nazvy = [li.nazev for li in P.linky]
+        vyber_l = c2.selectbox("Linka", lin_nazvy)
+        J = jizda_pro(R, vyber, P.linky[lin_nazvy.index(vyber_l)])
         c = st.columns(3)
-        metric(c[0], "Se všemi zastávkami", fmt_cas(J.celkem_s))
-        metric(c[1], "Bez zastavení", fmt_cas(J.express_s))
+        metric(c[0], "Celková jízdní doba", fmt_cas(J.celkem_s))
+        metric(c[1], "Zastavení", f"{sum(1 for x in J.jizdni_rad[1:-1] if x[3])}")
         metric(c[2], "Průměrná rychlost", f"{R.delka_m / 1000 / max(J.celkem_s / 3600, 1e-9):.0f} km/h")
         c1, c2 = st.columns(2)
         RJ = copy.copy(R)
@@ -557,11 +613,13 @@ with tabs[5]:
             st.subheader("Jízdní řád")
             st.dataframe(report.tab_jizdni_rad(RJ), hide_index=True, width="stretch")
         with c2:
-            st.subheader("Úseky")
+            st.subheader("Úseky mezi zastaveními")
             st.dataframe(report.tab_useky_jizdy(RJ), hide_index=True, width="stretch")
         st.plotly_chart(report.fig_rychlost(R, J), width="stretch", key="pl_rychlost2")
         st.caption(f"Jízdní doby obsahují přirážku {R.project.vlak.rezerva_pct:.0f} % a pobyt v každé zastávce "
                    f"{R.project.vlak.pobyt_stanice_s:.0f} s. Žluté pásy = úseky se sníženou rychlostí.")
+        st.subheader("Porovnání vlaků (všechny zastávky / bez zastavení)")
+        st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
 
 with tabs[6]:
     if R is None:

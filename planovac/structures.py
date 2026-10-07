@@ -167,7 +167,9 @@ def classify(h: np.ndarray, s: np.ndarray, voda: np.ndarray, bud_na_m: np.ndarra
 
 def analyze(xy, s, h, voda, reky, bud_na_m, osm: OsmData, navrh: NavrhoveParametry, ceny: Ceny,
             stanice_xy: list[tuple[float, float]] | None = None,
-            zastavba_mask: np.ndarray | None = None, demolice_mil: float | None = None) -> Analyza:
+            zastavba_mask: np.ndarray | None = None, demolice_mil: float | None = None,
+            bez_demolic: np.ndarray | None = None) -> Analyza:
+    """``bez_demolic`` – maska vzorků (souběh se stávající tratí), kde se nic nebourá."""
     t = classify(h, s, voda, bud_na_m, navrh, ceny, demolice_mil)
     line = LineString(xy)
 
@@ -240,6 +242,8 @@ def analyze(xy, s, h, voda, reky, bud_na_m, osm: OsmData, navrh: NavrhoveParamet
         dd = d[ok]
         half = np.where(zem[ii], b / 2 + n * np.abs(h[ii]) + 3, np.where(np.isin(t[ii], (ESTAKADA, MOST)), 8.0,
                                                                           np.where(t[ii] == HLOUBENY, b / 2 + 4, -1.0)))
+        if bez_demolic is not None:
+            half = np.where(bez_demolic[ii], -1.0, half)
         demol = bi[dd <= half]
         hluk = int(np.sum((dd <= 100.0) & (t[ii] != TUNEL) & (t[ii] != HLOUBENY)))
 

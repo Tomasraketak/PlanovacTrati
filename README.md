@@ -13,6 +13,9 @@ vloží oblouky, navrhne niveletu a spočítá:
 - 💰 **orientační cenu** po položkách,
 - ⏱️ **jízdní doby** a jízdní řád pro zvolený vlak (**RegioPanter, Railjet, Pendolino, ICE, TGV** nebo vlastní)
   s reálným zrychlením a brzděním, pobyt v zastávce 90 s, porovnání všech vlaků,
+- 🛤️ **souběh se stávající tratí** (osa do ±4 m od koleje → −50 % ceny, bez penalizací a demolic) a **se silnicí**
+  (do 10 m od okraje dálnice / silnice pro motorová vozidla / I. třídy → −25 %),
+- 🚉 **linky**: zastávkový vlak, expres bez zastavení nebo rychlík jen ve vybraných stanicích – tabulka vlak × linka,
 - 🐢 **úseky se sníženou rychlostí** (max. 4 × 3 km, min. 120 km/h) tam, kde výrazně ušetří nebo zachrání domy,
 - 📈 **podélný profil** a sklony,
 - ⬇️ export do **HTML reportu, GeoJSON, KML (Google Earth), CSV (Excel)**.
@@ -115,6 +118,8 @@ Podrobný návod: **[docs/NAVOD.md](docs/NAVOD.md)** (je i přímo v aplikaci na
 | Max. prodloužení proti vzdušné čáře | 20 % | pro každý úsek mezi sousedními body |
 | Priority | 1,0 | obce, domy, tunely/estakády, voda, chráněná území, délka |
 | Penalizace demolice | +40 mil. Kč/dům | jen pro optimalizaci, do rozpočtu se nepočítá |
+| Souběh | trať ±4 m −50 %, silnice 10 m −25 % | dálnice, silnice pro motorová vozidla, I. třída |
+| Linky | zastávkový, expres, rychlík | stanice zastavení volitelné |
 | Snížená rychlost | max. 4 úseky × 3 km, ≥ 120 km/h | použije se při úspoře ≥ 300 mil. Kč nebo ≥ 5 domech |
 | Jednotkové ceny | ČR ~2025 | tunel 1,3 mld./km, estakáda 650 mil./km, … |
 | Vlak | ICE 3 | na výběr RegioPanter, Railjet, Pendolino, ICE 3, TGV, vlastní; pobyt 90 s |

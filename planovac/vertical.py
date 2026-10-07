@@ -77,6 +77,7 @@ def design_profile(
     ceny: Ceny,
     ds: float = 25.0,
     demolice_mil: float | None = None,
+    faktor: np.ndarray | None = None,
 ) -> np.ndarray:
     """Vrátí výšku nivelety [m n. m.] ve vzorcích ``s``."""
     L = float(s[-1])
@@ -87,6 +88,8 @@ def design_profile(
     vc = _resample_flags(s, voda, sc, ds / 2 + 5)
     # budovy: součet na hrubý krok -> na metr
     bc = np.interp(sc, s, ndimage.uniform_filter1d(budovy_na_m.astype(float), max(1, int(ds / max(s[1] - s[0], 1)))))
+    # sleva za souběh se stávající tratí / silnicí (násobí cenu metru)
+    fc = np.ones(M) if faktor is None else np.interp(sc, s, faktor)
 
     g = navrh.max_sklon_promile / 1000.0
     g_st = navrh.max_sklon_stanice_promile / 1000.0
@@ -108,12 +111,12 @@ def design_profile(
     N = len(levels)
 
     D = np.empty((M, N), dtype=np.float32)
-    D[0] = best_cost(levels - zc[0], navrh, ceny, vc[0], bc[0], demolice_mil) * ds / 2
+    D[0] = best_cost(levels - zc[0], navrh, ceny, vc[0], bc[0], demolice_mil) * fc[0] * ds / 2
     for i in range(1, M):
         k = int(min(kmax[i], kmax[i - 1]))
         prev = D[i - 1]
         best = ndimage.minimum_filter1d(prev, size=2 * k + 1, mode="nearest") if k > 0 else prev
-        D[i] = best + best_cost(levels - zc[i], navrh, ceny, vc[i], bc[i], demolice_mil) * ds
+        D[i] = best + best_cost(levels - zc[i], navrh, ceny, vc[i], bc[i], demolice_mil) * fc[i] * ds
     # zpětný průchod
     lev = np.empty(M, dtype=int)
     lev[-1] = int(np.argmin(D[-1]))

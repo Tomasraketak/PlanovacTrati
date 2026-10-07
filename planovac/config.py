@@ -124,6 +124,40 @@ class Ceny:
     rezerva_pct: float = 20.0              # rezerva na nepředvídané náklady
 
 
+@dataclass
+class Soubeh:
+    """Slevy za souběh se stávající železnicí a s hlavními silnicemi."""
+
+    povolit: bool = True
+    zeleznice_tolerance_m: float = 4.0     # osa do ±4 m od stávající koleje
+    zeleznice_sleva_pct: float = 50.0      # využití tělesa a pozemků; bez penalizací
+    silnice_vzdalenost_m: float = 10.0     # osa do 10 m od okraje vozovky
+    silnice_sleva_pct: float = 25.0
+    silnice_tridy: str = "motorway,trunk,primary"  # dálnice, silnice pro motorová vozidla, I. třída
+
+
+# poloviční šířka vozovky [m] podle třídy OSM (dálnice: jeden směrový pás bývá v OSM samostatná linie)
+POLOVICNI_SIRKA_SILNICE = {"motorway": 6.0, "trunk": 6.0, "primary": 4.0, "secondary": 3.5}
+
+
+@dataclass
+class Linka:
+    """Způsob zastavování vlaku. Prázdné ``zastavky`` = expres; ``vsechny`` = zastávkový."""
+
+    nazev: str
+    zastavky: list[str] = field(default_factory=list)
+    vsechny: bool = False
+
+    def zastavuje(self, nazev_stanice: str) -> bool:
+        return self.vsechny or nazev_stanice in self.zastavky
+
+
+def vychozi_linky() -> list[Linka]:
+    return [Linka("Zastávkový (všechny stanice)", [], True),
+            Linka("Expres (bez zastavení)", []),
+            Linka("Rychlík (vybrané stanice)", [])]
+
+
 # Předvolby vlaků – orientační veřejně dostupné parametry (hmotnost bez cestujících, trvalý výkon).
 # Davisova rovnice: odpor R = A + B·v + C·v² [kN], v v km/h.
 VLAKY: dict[str, dict] = {
@@ -205,6 +239,8 @@ class Project:
     ceny: Ceny = field(default_factory=Ceny)
     vlak: Vlak = field(default_factory=Vlak)
     omezeni: Omezeni = field(default_factory=Omezeni)
+    soubeh: Soubeh = field(default_factory=Soubeh)
+    linky: list[Linka] = field(default_factory=vychozi_linky)
     vypocet: Vypocet = field(default_factory=Vypocet)
 
     # ------------------------------------------------------------------ I/O
@@ -233,6 +269,8 @@ class Project:
             ceny=build(Ceny, d.get("ceny")),
             vlak=build(Vlak, vlak_d),
             omezeni=build(Omezeni, d.get("omezeni")),
+            soubeh=build(Soubeh, d.get("soubeh")),
+            linky=[build(Linka, x) for x in d["linky"]] if d.get("linky") else vychozi_linky(),
             vypocet=build(Vypocet, d.get("vypocet")),
         )
 
