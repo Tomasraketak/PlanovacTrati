@@ -11,7 +11,7 @@ Postup:
 2. Pro každého kandidáta a dvě rychlosti (minimální a střední) se osa přepočítá s menším
    poloměrem jen v okně a celá varianta se vyhodnotí (niveleta, stavby, rozpočet).
 3. Kandidát se přijme, pokud ušetří alespoň ``min_uspora_mil`` mil. Kč nebo zachrání alespoň
-   ``min_uspora_demolic`` domů (a celkově se neprodraží). Vybere se nejvýše ``max_pocet``
+   ``min_uspora_demolic`` domů, a přitom nepřibude žádná demolice. Vybere se nejvýše ``max_pocet``
    nepřekrývajících se úseků a ověří se jejich společný účinek.
 """
 from __future__ import annotations
@@ -157,7 +157,8 @@ def najdi_omezeni(
             dcena = zaklad.cena_mil - var.cena_mil
             ddem = zaklad.demolice - var.demolice
             dJ = zaklad.J - var.J
-            ok = dJ > 0 and (dcena >= cfg.min_uspora_mil or ddem >= cfg.min_uspora_demolic)
+            # nesmí přibýt demolice; musí výrazně ušetřit peníze nebo zachránit domy
+            ok = dJ > 0 and ddem >= 0 and (dcena >= cfg.min_uspora_mil or ddem >= cfg.min_uspora_demolic)
             protokol.append(f"km {s0 / 1000:.1f}–{s1 / 1000:.1f}, {v:.0f} km/h: úspora {dcena:,.0f} mil. Kč, "
                             f"demolic o {ddem} méně → {'přijato' if ok else 'nevyplatí se'}".replace(",", " "))
             if not ok:
@@ -179,7 +180,7 @@ def najdi_omezeni(
         osa = navrhni([(a, b, r) for a, b, r, _, _ in prijate])
         useky = useky_z_osy(osa, navrh)
         var = vyhodnot(osa)
-        if (var.J < zaklad.J and len(useky) <= cfg.max_pocet
+        if (var.J < zaklad.J and var.demolice <= zaklad.demolice and len(useky) <= cfg.max_pocet
                 and all(u.delka <= cfg.max_delka_m + 1 for u in useky)):
             # přiřadit k výsledným úsekům úspory jednotlivých kandidátů (podle polohy)
             for u in useky:

@@ -104,6 +104,7 @@ Podrobný návod: **[docs/NAVOD.md](docs/NAVOD.md)** (je i přímo v aplikaci na
 | | |
 |---|---|
 | ![Profil](docs/img/profil.png) | ![Stavby](docs/img/stavby.png) |
+| ![Jízdní doby](docs/img/jizdni_doby.png) | |
 
 ### Hlavní nastavitelné parametry
 

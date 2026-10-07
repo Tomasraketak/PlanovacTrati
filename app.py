@@ -246,7 +246,7 @@ with st.sidebar:
 
 st.markdown(f"""<div class="hero"><h1>🚄 {P.nazev}</h1>
 <p>Automatický návrh osy trati nad výškovým modelem a mapou – {P.navrh.rychlost_kmh:.0f} km/h ·
-max. sklon {P.navrh.max_sklon_promile:.0f} ‰ · prodloužení max. {P.navrh.max_prodlouzeni_pct:.0f} %</p></div>""",
+max. sklon {P.navrh.max_sklon_promile:g} ‰ · prodloužení max. {P.navrh.max_prodlouzeni_pct:.0f} %</p></div>""",
             unsafe_allow_html=True)
 
 

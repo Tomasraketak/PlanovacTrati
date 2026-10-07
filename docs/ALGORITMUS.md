@@ -79,7 +79,8 @@ Plná rychlost vyžaduje velké oblouky, takže osa někde „řízne“ přes o
 2. Pro každého kandidáta se osa přepočítá s menším minimálním poloměrem jen v okně – pro 120 km/h
    R = 11,8·120²/(D+I) ≈ 700 m a pro střední rychlost – a celá varianta se znovu vyhodnotí
    (niveleta, stavby, rozpočet, jízdní doba).
-3. Přijme se, pokud kritérium J = cena + penalizace·demolice klesne a úspora ≥ 300 mil. Kč nebo ≥ 5 domů.
+3. Přijme se, pokud kritérium J = cena + penalizace·demolice klesne, nepřibude žádná demolice a úspora je
+   ≥ 300 mil. Kč nebo ≥ 5 domů.
    Vyšší rychlost má přednost, dá-li ≥ 80 % úspory. Vybere se max. 4 nepřekrývajících se úseků a ověří
    jejich společný účinek.
 

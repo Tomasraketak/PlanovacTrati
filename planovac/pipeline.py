@@ -183,7 +183,11 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             # části nové osy mimo prohledaný pás doplnit
             pas2 = LineString(osa.xy).buffer(250).simplify(50).difference(pas1.buffer(-50))
             if not pas2.is_empty and pas2.area > 1e5:
-                stahni_budovy(pas2, 0.66)
+                try:
+                    stahni_budovy(pas2, 0.66)
+                except osm_mod.OverpassError as e:
+                    varovani.append(f"{e}. Budovy na krátkých úsecích mimo první prohledaný pás chybí – "
+                                    "počet demolic tam může být podhodnocen.")
         except osm_mod.OverpassError as e:
             varovani.append(f"{e}. Budovy nebyly staženy – vyhýbání se domům a počet demolic jsou jen přibližné "
                             "(podle zástavby).")

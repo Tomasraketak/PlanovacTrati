@@ -48,7 +48,7 @@ cenové úrovni ČR ~2025.
 Program smí na celé trati použít nejvýše **4 úseky** (nastavitelné), každý nejvýše **3 km** dlouhý, kde vlak
 pojede pomaleji (nejméně **120 km/h**). V takovém úseku smí být menší oblouky, takže se trať může vyhnout
 vesnici, kopci nebo údolí. Úsek se použije jen tehdy, když **ušetří alespoň 300 mil. Kč** nebo **zachrání
-alespoň 5 domů** (obojí nastavitelné). Na kartě *🏗️ Stavby* je tabulka použitých úseků i protokol, co všechno
+alespoň 5 domů** (obojí nastavitelné) – a nikdy nesmí počet demolic zvýšit. Na kartě *🏗️ Stavby* je tabulka použitých úseků i protokol, co všechno
 program zkoušel; v mapě jsou žlutě, v grafu rychlosti jako žluté pásy.
 
 ### 🚆 Vlak

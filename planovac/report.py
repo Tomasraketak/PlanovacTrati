@@ -87,9 +87,9 @@ def souhrn_text(r: Result) -> str:
         f"bez zastavení: {fmt_cas(s['express_s'])}",
     ]
     if r.omezeni:
+        uspora = f"{s['omezeni_uspora_mil']:,.0f}".replace(",", " ")
         lines.append(f"Úseky se sníženou rychlostí: {s['omezeni_ks']} ks / {s['omezeni_km']:.1f} km "
-                     f"(úspora {s['omezeni_uspora_mil']:,.0f} mil. Kč, o {s['omezeni_demolic_mene']} demolic méně)"
-                     .replace(",", " "))
+                     f"(úspora {uspora} mil. Kč, demolic o {s['omezeni_demolic_mene']} méně)")
         for u in r.omezeni:
             lines.append(f"  • km {u.s0 / 1000:.1f}–{u.s1 / 1000:.1f}: {u.rychlost_kmh:.0f} km/h (R {u.min_polomer_m:.0f} m)")
     if r.porovnani_vlaku:
@@ -602,7 +602,7 @@ def to_html_report(r: Result) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>{html.escape(r.project.nazev)} – návrh trati</title>
 <style>{REPORT_CSS}</style></head><body>
 <header><h1>🚄 {html.escape(r.project.nazev)}</h1>
-<p>Návrhová rychlost {r.project.navrh.rychlost_kmh:.0f} km/h · max. sklon {r.project.navrh.max_sklon_promile:.0f} ‰ ·
+<p>Návrhová rychlost {r.project.navrh.rychlost_kmh:.0f} km/h · max. sklon {r.project.navrh.max_sklon_promile:g} ‰ ·
 min. poloměr {r.project.navrh.min_polomer():.0f} m · vygenerováno {datetime.now():%d. %m. %Y %H:%M} programem Plánovač tratí</p></header>
 <main>
 <div class="kpis">{kpi_html}</div>
