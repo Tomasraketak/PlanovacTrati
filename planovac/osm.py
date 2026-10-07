@@ -28,7 +28,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import linemerge, polygonize, unary_union
 
 from .dem import USER_AGENT
-from .geo import to_xy
+from .geo import to_lonlat, to_xy
 from .paths import cache_dir
 
 log = logging.getLogger(__name__)

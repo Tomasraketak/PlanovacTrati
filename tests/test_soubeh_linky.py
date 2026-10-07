@@ -74,3 +74,20 @@ def test_sledovatelne_koleje_jen_prime_useky():
     o.zeleznice = [LineString(klikata), LineString(rovna)]
     out = koleje_sledovatelne(o, 1900.0)
     assert len(out) == 1 and out[0].length > 4000
+
+
+def test_uloziste_budov_nestahuje_znovu(tmp_path, monkeypatch):
+    import planovac.osm as o
+
+    monkeypatch.setenv("PLANOVAC_DATA", str(tmp_path))
+    volani = []
+
+    def fake(poly, progress, label=""):
+        volani.append(label)
+        return np.zeros((0, 2))
+
+    monkeypatch.setattr(o, "_fetch_poly", fake)
+    poly = [(14.5, 49.0), (14.6, 49.0), (14.6, 49.05), (14.5, 49.05), (14.5, 49.0)]
+    o.fetch_buildings_corridor(poly)
+    o.fetch_buildings_corridor(poly)
+    assert len(volani) == 1
