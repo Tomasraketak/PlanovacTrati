@@ -493,18 +493,22 @@ if spustit:
             from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
             ctx = get_script_run_ctx()
+            zamek = threading.Lock()
 
             def cb(frac, msg):
                 # výpočet volá průběh i z pracovních vláken – ty musí dostat kontext relace Streamlitu
                 if threading.current_thread() is not threading.main_thread() and ctx is not None:
                     add_script_run_ctx(threading.current_thread(), ctx)
-                try:
-                    bar.progress(min(max(frac, 0.0), 1.0), text=msg)
-                    if msg != last["msg"]:
-                        status.write(msg)
-                        last["msg"] = msg
-                except Exception:                  # průběh je jen kosmetický – nesmí shodit výpočet
-                    pass
+                # Zámek je nutný: souběžný zápis z více vláken do jednoho kontejneru pošle změny prohlížeči mimo
+                # pořadí a frontend spadne na „Bad delta path index“ (bílá obrazovka, v terminálu nic).
+                with zamek:
+                    try:
+                        bar.progress(min(max(frac, 0.0), 1.0), text=msg)
+                        if msg != last["msg"]:
+                            status.write(msg)
+                            last["msg"] = msg
+                    except Exception:              # průběh je jen kosmetický – nesmí shodit výpočet
+                        pass
 
             try:
                 t0 = time.time()
