@@ -14,16 +14,42 @@ def pocet_vlaken(pozadovano: int = 0) -> int:
 
 
 @contextmanager
+def _bez_importu_hlavniho_modulu():
+    """Spawnutý proces nesmí znovu importovat hlavní skript.
+
+    Standardně ``spawn`` v dítěti spustí hlavní modul rodiče. Pod ``streamlit run app.py`` by tedy každý pracovní
+    proces spustil celou aplikaci (a výpočet by visel); funkce pro pracovní procesy leží v importovatelných
+    modulech balíčku, hlavní skript tedy není potřeba.
+    """
+    import multiprocessing.spawn as sp
+
+    puvodni = sp.get_preparation_data
+
+    def priprava(name):
+        d = puvodni(name)
+        d.pop("init_main_from_path", None)
+        d.pop("init_main_from_name", None)
+        return d
+
+    sp.get_preparation_data = priprava
+    try:
+        yield
+    finally:
+        sp.get_preparation_data = puvodni
+
+
+@contextmanager
 def procesy(n: int):
     """Procesový pool (spawn – funguje stejně na Windows, Linuxu i v Streamlitu); při ``n <= 1`` vrací None."""
     if n <= 1:
         yield None
         return
-    ex = ProcessPoolExecutor(max_workers=n, mp_context=multiprocessing.get_context("spawn"))
-    try:
-        yield ex
-    finally:
-        ex.shutdown(wait=True, cancel_futures=True)
+    with _bez_importu_hlavniho_modulu():
+        ex = ProcessPoolExecutor(max_workers=n, mp_context=multiprocessing.get_context("spawn"))
+        try:
+            yield ex
+        finally:
+            ex.shutdown(wait=True, cancel_futures=True)
 
 
 @contextmanager
