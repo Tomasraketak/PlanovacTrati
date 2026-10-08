@@ -16,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="planovac", description="Plánovač tratí – návrh osy VRT z výškového modelu a OSM")
     sub = ap.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", help="spočítá projekt a uloží výstupy")
-    run.add_argument("projekt", help="cesta k YAML projektu (např. projekty/cb_jh_jihlava.yaml)")
+    run.add_argument("projekt", help="cesta k YAML projektu (např. projekty/demo.yaml)")
     run.add_argument("-o", "--out", default=None, help="výstupní složka (výchozí vystupy/<název souboru>)")
     run.add_argument("--demo", action="store_true", help="použít syntetický terén (bez internetu)")
     run.add_argument("--rozliseni", type=float, default=None, help="rozlišení rastru v metrech")

@@ -139,3 +139,60 @@ def test_klic_trvale_a_migrace(tmp_path, monkeypatch):
     monkeypatch.delenv("MAPY_API_KEY")
     auto.uloz_klic("")
     assert auto.nacti_klic() == ""
+
+
+def test_pravidla_omezeni_a_comfortjet():
+    from planovac.config import VLAKY, Omezeni, Vlak, _omezeni_z_dict
+    from planovac.omezeni import rychlosti_pravidla
+
+    o = Omezeni()
+    assert len(o.aktivni_pravidla()) == 2
+    assert o.usek_povolen(1800, 80) and not o.usek_povolen(2500, 80) and o.usek_povolen(2900, 120)
+    assert not o.usek_povolen(1500, 60)
+    v = rychlosti_pravidla(o.pravidla[1], NavrhoveParametry())
+    assert min(v) == 80 and max(v) < 200
+    # starý formát projektu → pravidlo 1 z původních hodnot + výchozí silné pravidlo
+    st = _omezeni_z_dict({"max_pocet": 3, "max_delka_m": 2500, "min_rychlost_kmh": 100, "min_uspora_mil": 111,
+                          "min_uspora_demolic": 7})
+    assert st.pravidla[0].max_delka_m == 2500 and st.pravidla[0].max_pocet == 3 and len(st.pravidla) == 2
+    # YAML roundtrip
+    p = Project()
+    p.omezeni.pravidla[1].min_rychlost_kmh = 90
+    assert Project.from_yaml(p.to_yaml()).omezeni.pravidla[1].min_rychlost_kmh == 90
+    cj = next(k for k in VLAKY if k.startswith("ComfortJet"))
+    assert Vlak.z_predvolby(cj).max_rychlost_kmh == 200
+
+
+def test_silne_pravidlo_je_pouzito_jen_pri_velke_uspore(monkeypatch):
+    """Stub: úsek 1,8 km při 75–80 km/h ušetří 600 mil. Kč a 12 domů → pravidlo „do 2 km, 80 km/h“ ho přijme;
+    při úspoře 200 mil. a 2 domech ho zamítne."""
+    from types import SimpleNamespace as NS
+
+    from planovac import omezeni as om
+    from planovac.config import Omezeni
+
+    osa = NS(delka=10000.0)
+    monkeypatch.setattr(om, "kandidati", lambda *a, **k: [(1000.0, 3000.0)])
+    stav = {"prvni": True}
+
+    def fake_useky(o, navrh, spojit_m=1000.0):
+        if stav.pop("prvni", False):
+            return []
+        return [om.Usek(1000.0, 2800.0, 300.0, 75.0)]
+
+    monkeypatch.setattr(om, "useky_z_osy", fake_useky)
+
+    def zkus(uspora, domy):
+        stav["prvni"] = True
+        zaklad = om.Varianta(osa, 10000.0, 20, 10000.0 + 800.0, 1000.0)
+        var = om.Varianta(osa, 10000.0 - uspora, 20 - domy, 10000.0 - uspora + 8.0 * (20 - domy), 1010.0)
+        cfg = Omezeni()
+        cfg.pravidla = [cfg.pravidla[1]]            # jen silné pravidlo (do 2 km, 80 km/h, ≥ 500 mil. / 10 domů)
+        v, useky, prot = om.najdi_omezeni(zaklad, [], np.zeros(10), 50.0, NavrhoveParametry(), cfg,
+                                          lambda zony: osa, lambda o: var, 40.0)
+        return useky, prot
+
+    useky, _ = zkus(600.0, 12)
+    assert len(useky) == 1 and useky[0].rychlost_kmh <= 80
+    useky, _ = zkus(200.0, 2)
+    assert useky == []

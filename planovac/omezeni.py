@@ -2,8 +2,10 @@
 
 Plná návrhová rychlost vyžaduje velké poloměry oblouků (200 km/h → R ≥ 1 900 m), takže osa občas
 nemůže sledovat optimální koridor a „řízne“ přes obec, kopec nebo údolí. Povolíme-li na krátkém
-úseku (max. ``max_delka_m``) nižší rychlost, smí tam být oblouk menší (120 km/h → R ≈ 700 m)
-a osa se tomu místu vyhne.
+úseku nižší rychlost, smí tam být oblouk menší (120 km/h → R ≈ 700 m, 80 km/h → R ≈ 300 m)
+a osa se tomu místu vyhne. Povolených „pravidel“ může být několik (každé s vlastní nejdelší délkou
+úseku, nejnižší rychlostí, počtem a prahy úspory) – např. mírné snížení do 3 km na ≥ 120 km/h
+a silné snížení do 2 km až na 80 km/h, ale jen při velké úspoře.
 
 Postup:
 1. Kandidáti = okna podél osy, kde je stavba drahá (tunely, estakády, demolice) a osa se přitom
@@ -11,8 +13,9 @@ Postup:
 2. Pro každého kandidáta a dvě rychlosti (minimální a střední) se osa přepočítá s menším
    poloměrem jen v okně a celá varianta se vyhodnotí (niveleta, stavby, rozpočet).
 3. Kandidát se přijme, pokud ušetří alespoň ``min_uspora_mil`` mil. Kč nebo zachrání alespoň
-   ``min_uspora_demolic`` domů, a přitom nepřibude žádná demolice. Vybere se nejvýše ``max_pocet``
-   nepřekrývajících se úseků a ověří se jejich společný účinek.
+   ``min_uspora_demolic`` domů (prahy pravidla, ve kterém byl zkoušen), a přitom nepřibude žádná
+   demolice. Vybere se nejvýše ``max_pocet`` nepřekrývajících se úseků (celkem i po pravidlech)
+   a ověří se jejich společný účinek.
 """
 from __future__ import annotations
 
@@ -25,7 +28,7 @@ import numpy as np
 import shapely
 from shapely.geometry import MultiLineString
 
-from .config import NavrhoveParametry, Omezeni
+from .config import NavrhoveParametry, Omezeni, PravidloOmezeni
 
 DELKA_VLAKU_M = 200.0
 
@@ -88,7 +91,7 @@ def useky_z_osy(osa, navrh: NavrhoveParametry, spojit_m: float = 1000.0) -> list
 
 
 def kandidati(zaklad: Varianta, koridory_xy: list[np.ndarray], cena_na_m: np.ndarray, rozliseni: float,
-              cfg: Omezeni, pocet: int = 6) -> list[tuple[float, float]]:
+              L: float, pocet: int = 6) -> list[tuple[float, float]]:
     """Okna (s0, s1) ve staničení základní osy, kde by snížená rychlost mohla pomoci."""
     osa = zaklad.osa
     s, xy = osa.s, osa.xy
@@ -101,7 +104,6 @@ def kandidati(zaklad: Varianta, koridory_xy: list[np.ndarray], cena_na_m: np.nda
     odchylka = np.convolve(odchylka.astype(float), np.ones(2 * w + 1), mode="same") > 0
     cena_na_m = np.where(np.isfinite(cena_na_m), cena_na_m, 0.0)
     nadmerna = np.maximum(cena_na_m - np.median(cena_na_m), 0.0) * odchylka * ds
-    L = cfg.max_delka_m
     n = max(1, int(L / ds))
     okno = np.convolve(nadmerna, np.ones(n), mode="same")
     vybrane: list[tuple[float, float]] = []
@@ -114,6 +116,16 @@ def kandidati(zaklad: Varianta, koridory_xy: list[np.ndarray], cena_na_m: np.nda
             continue
         vybrane.append((s0, s1))
     return vybrane
+
+
+def rychlosti_pravidla(pr: PravidloOmezeni, navrh: NavrhoveParametry) -> list[float]:
+    """Rychlosti, které se pro pravidlo zkoušejí: nejnižší dovolená, střední a (u velkého rozpětí) další."""
+    v_min = min(pr.min_rychlost_kmh, navrh.rychlost_kmh - 10)
+    v_stred = math.floor(((v_min + navrh.rychlost_kmh) / 2) / 10) * 10
+    v = {v_stred, v_min}
+    if v_stred - v_min >= 60:
+        v.add(math.floor(((v_min + v_stred) / 2) / 10) * 10)
+    return sorted(v, reverse=True)
 
 
 def najdi_omezeni(
@@ -136,51 +148,56 @@ def najdi_omezeni(
     snižuje přínos úseku se sníženou rychlostí. Zkoušky kandidátů běží ve vláknech.
     """
     protokol: list[str] = []
-    if not cfg.povolit or cfg.max_pocet <= 0:
+    pravidla = cfg.aktivni_pravidla()
+    if not cfg.povolit or cfg.max_pocet <= 0 or not pravidla:
         return zaklad, [], protokol
-    v_min = min(cfg.min_rychlost_kmh, navrh.rychlost_kmh - 10)
-    v_stred = math.floor(((v_min + navrh.rychlost_kmh) / 2) / 10) * 10
-    rychlosti = sorted({v_stred, v_min}, reverse=True)
     puvodni = useky_z_osy(zaklad.osa, navrh)
 
-    kand = kandidati(zaklad, koridory_xy, cena_na_m, rozliseni, cfg)
-    ulohy = [(ci, s0, s1, v) for ci, (s0, s1) in enumerate(kand) for v in rychlosti]
+    ulohy = []                     # (index pravidla, okno, s0, s1, rychlost)
+    pocet_oken = {}
+    for ri, pr in enumerate(pravidla):
+        kand = kandidati(zaklad, koridory_xy, cena_na_m, rozliseni, pr.max_delka_m)
+        pocet_oken[ri] = len(kand)
+        for ci, (s0, s1) in enumerate(kand):
+            for v in rychlosti_pravidla(pr, navrh):
+                ulohy.append((ri, ci, s0, s1, v))
 
     def zkus(uloha):
-        ci, s0, s1, v = uloha
+        ri, ci, s0, s1, v = uloha
+        pr = pravidla[ri]
         if progress:
             progress(f"Zkouším snížit rychlost na {v:.0f} km/h v km {s0 / 1000:.1f}–{s1 / 1000:.1f} "
-                     f"({ci + 1}/{len(kand)}) …")
+                     f"({pr.nazev}, {ci + 1}/{pocet_oken[ri]}) …")
         Rz = polomer_pro_rychlost(v, navrh)
         osa = navrhni([(s0, s1, Rz)])
         useky = useky_z_osy(osa, navrh)
         nove = [u for u in useky if not any(abs(u.s0 - z.s0) < 50 and abs(u.s1 - z.s1) < 50 for z in puvodni)]
         if not nove:
             return None
-        if max(u.delka for u in nove) > cfg.max_delka_m + 1:
-            return (f"km {s0 / 1000:.1f}: úsek by byl delší než {cfg.max_delka_m / 1000:.1f} km – zamítnuto",
+        if max(u.delka for u in nove) > pr.max_delka_m + 1:
+            return (f"km {s0 / 1000:.1f}: úsek by byl delší než {pr.max_delka_m / 1000:.1f} km – zamítnuto",
                     None)
         var = vyhodnot(osa)
         dcena = zaklad.cena_mil - var.cena_mil
         ddem = zaklad.demolice - var.demolice
         dJ = zaklad.J - var.J
         # nesmí přibýt demolice; musí výrazně ušetřit peníze nebo zachránit domy (a vyplatit se i s časem)
-        ok = dJ > 0 and ddem >= 0 and (dcena >= cfg.min_uspora_mil or ddem >= cfg.min_uspora_demolic)
-        radek = (f"km {s0 / 1000:.1f}–{s1 / 1000:.1f}, {v:.0f} km/h: úspora {dcena:,.0f} mil. Kč, "
+        ok = dJ > 0 and ddem >= 0 and (dcena >= pr.min_uspora_mil or ddem >= pr.min_uspora_demolic)
+        radek = (f"[{pr.nazev}] km {s0 / 1000:.1f}–{s1 / 1000:.1f}, {v:.0f} km/h: úspora {dcena:,.0f} mil. Kč, "
                  f"demolic o {ddem} méně, čas {var.jizdni_doba_s - zaklad.jizdni_doba_s:+.0f} s "
                  f"→ {'přijato' if ok else 'nevyplatí se'}").replace(",", " ")
         if not ok:
             return radek, None
         info = Usek(min(u.s0 for u in nove), max(u.s1 for u in nove), min(u.min_polomer_m for u in nove), v,
                     uspora_mil=dcena, demolic_mene=ddem, ztrata_casu_s=var.jizdni_doba_s - zaklad.jizdni_doba_s)
-        return radek, (ci, s0, s1, Rz, dJ, info)
+        return radek, (ri, ci, s0, s1, Rz, dJ, info)
 
     if vlakna > 1 and len(ulohy) > 1:
         with ThreadPoolExecutor(max_workers=min(vlakna, len(ulohy))) as ex:
             vysledky = list(ex.map(zkus, ulohy))
     else:
         vysledky = [zkus(u) for u in ulohy]
-    nejlepsi_na_okno: dict[int, tuple] = {}
+    nejlepsi_na_okno: dict[tuple[int, int], tuple] = {}
     for r in vysledky:
         if r is None:
             continue
@@ -188,22 +205,32 @@ def najdi_omezeni(
         protokol.append(radek)
         if ok is None:
             continue
-        ci, s0, s1, Rz, dJ, info = ok
+        ri, ci, s0, s1, Rz, dJ, info = ok
         # vyšší rychlost má přednost, pokud dá aspoň 80 % úspory nižší
-        if ci not in nejlepsi_na_okno or dJ > nejlepsi_na_okno[ci][3] / 0.8:
-            nejlepsi_na_okno[ci] = (s0, s1, Rz, dJ, info)
-    prijate: list[tuple[float, float, float, float, Usek]] = list(nejlepsi_na_okno.values())
+        kl = (ri, ci)
+        if kl not in nejlepsi_na_okno or dJ > nejlepsi_na_okno[kl][3] / 0.8:
+            nejlepsi_na_okno[kl] = (s0, s1, Rz, dJ, info, ri)
 
-    prijate.sort(key=lambda p: -p[3])
-    prijate = prijate[: cfg.max_pocet]
+    # výběr: nejvýhodnější první, bez překryvů, v mezích počtů (celkem i po pravidlech)
+    prijate: list[tuple] = []
+    po_pravidlech = {i: 0 for i in range(len(pravidla))}
+    for kandidat in sorted(nejlepsi_na_okno.values(), key=lambda p: -p[3]):
+        s0, s1, _, _, _, ri = kandidat
+        if len(prijate) >= cfg.max_pocet or po_pravidlech[ri] >= pravidla[ri].max_pocet:
+            continue
+        if any(not (s1 <= p[0] or s0 >= p[1]) for p in prijate):
+            continue
+        prijate.append(kandidat)
+        po_pravidlech[ri] += 1
+
     while prijate:
         if progress:
             progress(f"Ověřuji kombinaci {len(prijate)} úseků se sníženou rychlostí …")
-        osa = navrhni([(a, b, r) for a, b, r, _, _ in prijate])
+        osa = navrhni([(p[0], p[1], p[2]) for p in prijate])
         useky = useky_z_osy(osa, navrh)
         var = vyhodnot(osa)
         if (var.J < zaklad.J and var.demolice <= zaklad.demolice and len(useky) <= cfg.max_pocet
-                and all(u.delka <= cfg.max_delka_m + 1 for u in useky)):
+                and all(cfg.usek_povolen(u.delka, u.rychlost_kmh) for u in useky)):
             # přiřadit k výsledným úsekům úspory jednotlivých kandidátů (podle polohy)
             for u in useky:
                 c = (u.s0 + u.s1) / 2

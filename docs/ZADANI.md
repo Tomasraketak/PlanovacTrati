@@ -7,7 +7,7 @@ vysokorychlostní trati** mezi zadanými body, spočítá **orientační cenu**,
 staveb** (tunely, estakády, mosty, zemní práce, demolice) a vykreslí **interaktivní mapu** a **podélný profil**.
 Ovládání přes přehledné webové GUI v prohlížeči, výpočet lze spustit i z příkazové řádky.
 
-Typické použití: „Navrhni trať na 200 km/h České Budějovice – Třeboň – Jindřichův Hradec – Jihlava, max. sklon 25 ‰,
+Typické použití: „Navrhni trať na 200 km/h mezi zadanými stanicemi, max. sklon 25 ‰,
 co nejméně tunelů a estakád, ať se nebourají domy a trať se vyhýbá obcím bez zastávky, prodloužení proti vzdušné
 čáře max. 20 %.“
 
@@ -61,7 +61,7 @@ Body se zadávají kliknutím do mapy, vyhledáním názvu (Nominatim) nebo ruč
   zastávky + voda + chráněná území, s váhami nastavitelnými uživatelem.
 - F6 Okolí stanic (nastavitelný okruh) se za zástavbu nepenalizuje – trať do měst se zastávkou vést má.
 - F7 Výpočet běží s ukazatelem průběhu, chyby se zobrazí srozumitelně česky.
-- F8 Projekt lze uložit/načíst (YAML), přednastaven projekt ČB – JH – Jihlava a demo projekt.
+- F8 Projekt lze uložit/načíst (YAML), ukázkové projekty: demo (syntetické) a příklad s reálnými daty (jižní Čechy).
 
 ## 5. Vývojové podmínky (nefunkční požadavky)
 

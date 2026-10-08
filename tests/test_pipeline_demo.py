@@ -28,7 +28,7 @@ def test_demo_end_to_end(tmp_path):
 
 
 def test_yaml_roundtrip():
-    p = Project.load(ROOT / "projekty" / "cb_jh_jihlava.yaml")
+    p = Project.load(ROOT / "projekty" / "priklad_jizni_cechy.yaml")
     q = Project.from_yaml(p.to_yaml())
     assert q.to_dict() == p.to_dict()
     assert not q.validate()

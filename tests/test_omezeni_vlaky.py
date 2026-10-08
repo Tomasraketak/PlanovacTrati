@@ -70,11 +70,12 @@ def test_zona_povoli_mensi_oblouky_jen_uvnitr():
 def test_demo_s_omezenimi():
     p = Project.load(ROOT / "projekty" / "demo.yaml")
     p.vypocet.rozliseni_m = 100
-    p.omezeni.min_uspora_mil = 0.0      # přijmout jakoukoli úsporu
-    p.omezeni.min_uspora_demolic = 1
+    for pr in p.omezeni.pravidla:
+        pr.min_uspora_mil = 0.0         # přijmout jakoukoli úsporu
+        pr.min_uspora_demolic = 1
     r = run_project(p)
     assert len(r.omezeni) <= p.omezeni.max_pocet
-    assert all(u.delka <= p.omezeni.max_delka_m + 1 for u in r.omezeni)
+    assert all(p.omezeni.usek_povolen(u.delka, u.rychlost_kmh) for u in r.omezeni)
     J = lambda cena, dem: cena + p.vahy.penalizace_demolice_mil * p.vahy.budovy * dem  # noqa: E731
     assert J(r.rozpocet.celkem_mil, len(r.analyza.demolice_idx)) <= J(r.zaklad_cena_mil, r.zaklad_demolice) + 1e-6
     assert len(r.porovnani_vlaku) == len(VLAKY)

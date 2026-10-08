@@ -2,7 +2,7 @@
 
 **Automatický návrh osy vysokorychlostní trati nad výškovým modelem terénu a mapou OpenStreetMap.**
 
-Zadáte stanice (např. *České Budějovice – Třeboň – Jindřichův Hradec – Jihlava*), návrhovou rychlost, maximální sklon,
+Zadáte stanice, zastávky a průjezdní body (klikáním do mapy – kdekoli), návrhovou rychlost, maximální sklon,
 o kolik % smí být trať delší než vzdušná čára a co je pro vás důležité (málo tunelů a estakád, nebourat domy,
 vyhnout se vesnicím bez zastávky…). Program sám stáhne výškový model a mapová data, **najde optimální trasu**,
 vloží oblouky, navrhne niveletu a spočítá:
@@ -11,7 +11,7 @@ vloží oblouky, navrhne niveletu a spočítá:
 - 🏗️ **statistiku staveb** – kolik a jak dlouhých tunelů, estakád a mostů, objemy zemních prací, demolice budov,
   křížení silnic a železnic, obce u trati, průchod chráněnými územími,
 - 💰 **orientační cenu** po položkách,
-- ⏱️ **jízdní doby** a jízdní řád pro zvolený vlak (**RegioPanter, Railjet, Pendolino, ICE, TGV** nebo vlastní)
+- ⏱️ **jízdní doby** a jízdní řád pro zvolený vlak (**RegioPanter, Railjet, ComfortJet, Pendolino, ICE, TGV** nebo vlastní)
   s reálným zrychlením a brzděním, pobyt v zastávce 90 s, porovnání všech vlaků,
 - 🛤️ **souběh se stávající tratí** (osa do ±4 m od koleje → −50 % ceny, bez penalizací a demolic) a **se silnicí**
   (do 10 m od okraje dálnice / silnice pro motorová vozidla / I. třídy → −25 %),
@@ -90,8 +90,8 @@ py -3 -m venv .venv
 
 ## 🧭 Jak se to používá
 
-1. Vlevo v **📁 Projekt** vyberte `cb_jh_jihlava` (přednastaveno) nebo `demo` (bez internetu, hotovo za pár
-   sekund) a klikněte **Načíst projekt**.
+1. Začněte rovnou **klikáním do mapy** (prázdný projekt), nebo vlevo v **📁 Projekt** vyberte ukázku – `demo` (bez
+   internetu, hotovo za pár sekund) či `priklad_jizni_cechy` (reálná data) – a klikněte **Načíst projekt**.
 2. Na kartě **🗺️ Trasa a zastávky** zvolte režim a klikáním do mapy přidávejte **stanice** (vlak zastavuje, trať smí do města)
    a **průjezdní body** (trať jimi povede, vlak nezastaví) – program je sám zařadí do pořadí a pojmenuje
    a **průjezdní body** (trasa tudy musí vést). Body lze i vyhledat podle názvu nebo upravit v tabulce.
@@ -122,7 +122,7 @@ Podrobný návod: **[docs/NAVOD.md](docs/NAVOD.md)** (je i přímo v aplikaci na
 | Linky | zastávkový, expres, rychlík | stanice zastavení volitelné |
 | Snížená rychlost | max. 4 úseky × 3 km, ≥ 120 km/h | použije se při úspoře ≥ 300 mil. Kč nebo ≥ 5 domech |
 | Jednotkové ceny | ČR ~2025 | tunel 1,3 mld./km, estakáda 650 mil./km, … |
-| Vlak | ICE 3 | na výběr RegioPanter, Railjet, Pendolino, ICE 3, TGV, vlastní; pobyt 90 s |
+| Vlak | ICE 3 | na výběr RegioPanter, Railjet, ComfortJet, Pendolino, ICE 3, TGV, vlastní; pobyt 90 s |
 | Rozlišení | 20 m | 100 m rychlý náhled / 20 m detail / 10–15 m jen s velkou RAM (≥ 32 GB) |
 | Vlákna | všechna | koridory úseků i zkoušky úseků běží souběžně |
 | Hodnota času | 500 mil. Kč/min | kolik se vyplatí za minutu jízdní doby (tunel × obchvat) |
@@ -139,12 +139,12 @@ planovac.bat novy projekty\moje_trat.yaml                 :: šablona nového pr
 i v Poznámkovém bloku:
 
 ```yaml
-nazev: VRT České Budějovice – Třeboň – Jindřichův Hradec – Jihlava
+nazev: Moje trať
 body:
-- {nazev: České Budějovice, lat: 48.9745, lon: 14.488, typ: stanice}
-- {nazev: Třeboň, lat: 49.0153, lon: 14.7607, typ: stanice}
-- {nazev: Jindřichův Hradec, lat: 49.144, lon: 15.003, typ: stanice}
-- {nazev: Jihlava, lat: 49.4155, lon: 15.602, typ: stanice}
+- {nazev: Město A, lat: 49.00, lon: 14.50, typ: stanice}
+- {nazev: Zastávka B, lat: 49.10, lon: 14.80, typ: zastávka}
+- {nazev: Bod u řeky, lat: 49.20, lon: 15.00, typ: průjezdní bod}
+- {nazev: Město C, lat: 49.40, lon: 15.60, typ: stanice}
 navrh:
   rychlost_kmh: 200
   max_sklon_promile: 25

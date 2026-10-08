@@ -90,12 +90,23 @@ stanice), **expres** (bez zastavení) a **rychlík** (vybrané stanice). Linky l
 jim zastávky; karta *⏱️ Jízdní doby* pak ukazuje **tabulku vlak × linka** a jízdní řád pro zvolenou kombinaci
 (projížděné stanice s časem průjezdu) – bez nového návrhu trati.
 
-### 🐢 Úseky se sníženou rychlostí
-Program smí na celé trati použít nejvýše **4 úseky** (nastavitelné), každý nejvýše **3 km** dlouhý, kde vlak
-pojede pomaleji (nejméně **120 km/h**). V takovém úseku smí být menší oblouky, takže se trať může vyhnout
-vesnici, kopci nebo údolí. Úsek se použije jen tehdy, když **ušetří alespoň 300 mil. Kč** nebo **zachrání
-alespoň 5 domů** (obojí nastavitelné) – a nikdy nesmí počet demolic zvýšit. Na kartě *🏗️ Stavby* je tabulka použitých úseků i protokol, co všechno
-program zkoušel; v mapě jsou žlutě, v grafu rychlosti jako žluté pásy.
+### 🐢 Pravidla pro úseky se sníženou rychlostí
+Optimalizace smí na krátkých úsecích **snížit rychlost** (menší oblouky), takže se trať může vyhnout vesnici, kopci
+nebo údolí. Co přesně smí, určuje **tabulka pravidel** (karta *🎛️ Koeficienty* → *Úseky se sníženou rychlostí*;
+řádky lze přidávat, mazat a vypínat):
+
+| Sloupec | Význam |
+|---|---|
+| Max. délka [m] | nejdelší úsek, na kterém smí pravidlo snížit rychlost |
+| Nejnižší rychlost [km/h] | nejnižší rychlost v úseku (80 km/h → oblouky od R ≈ 300 m, 120 km/h → R ≈ 700 m) |
+| Max. počet | kolikrát smí být pravidlo na trati použito |
+| Úspora ≥ [mil. Kč] / zachrání ≥ [domů] | úsek se použije jen tehdy, když ušetří aspoň tolik peněz **nebo** zachrání aspoň tolik domů |
+
+Výchozí jsou dvě pravidla: **mírné** (do 3 km, ≥ 120 km/h, 4×, při úspoře ≥ 300 mil. Kč nebo ≥ 5 domech) a **silné**
+(do 2 km, až 80 km/h, 2×, jen při úspoře ≥ 500 mil. Kč nebo ≥ 10 domech). Nad tím je celkový limit počtu úseků.
+Žádné pravidlo nikdy nesmí počet demolic zvýšit a úsek se musí vyplatit i po započtení ztraceného času
+(hodnota minuty). Tabulka použitých úseků a protokol zkoušek je na kartě *🏗️ Stavby*; v mapě jsou žlutě, v grafu
+rychlosti jako žluté pásy.
 
 ### 🐇 Limit rychlosti po úsecích
 V tabulce bodů (karta *Trasa a zastávky*) je sloupec **Max. rychlost k dalšímu bodu [km/h]** (nebo pole ve
@@ -114,7 +125,7 @@ chybě se použije **OSRM** (veřejné, bez dopravní situace). Z příkazové �
 Časy autem jsou orientační (bez zácp, semaforů mimo to, co ví služba).
 
 ### 🚆 Vlak
-Vyberte vlak: **RegioPanter (ČD 640)**, **Railjet**, **Pendolino (ČD 680, naklápěcí – rychleji v obloucích)**,
+Vyberte vlak: **RegioPanter (ČD 640)**, **Railjet**, **ComfortJet (Škoda 109E + vozy, 200 km/h)**, **Pendolino (ČD 680, naklápěcí – rychleji v obloucích)**,
 **ICE 3**, **TGV Euroduplex**, nebo *vlastní*. Předvolby mají orientační reálné parametry (výkon, hmotnost,
 tažná síla, zrychlení, brzdění, jízdní odpory); lze je upravit v *Parametry vozidla*. Pobyt v každé zastávce je
 výchozích **90 s**. Po výpočtu ukazuje karta *⏱️ Jízdní doby* **porovnání všech vlaků** a jízdní řád pro kterýkoli
@@ -161,7 +172,7 @@ Najetím myší na úsek trati se zobrazí jeho typ, staničení a délka. Vlevo
 ## Příkazová řádka
 
 ```bat
-planovac.bat run projekty\cb_jh_jihlava.yaml
+planovac.bat run projekty\demo.yaml
 planovac.bat run projekty\demo.yaml --rozliseni 100 -o vystupy\demo
 planovac.bat novy projekty\moje_trat.yaml
 ```

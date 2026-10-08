@@ -19,7 +19,7 @@ import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
 from planovac import __version__, aktualizace, diagnostika
-from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
+from planovac.config import PravidloOmezeni, TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
 
@@ -59,8 +59,8 @@ st.markdown(CSS, unsafe_allow_html=True)
 # =============================================================================== stav
 
 def _default_project() -> Project:
-    p = PROJECTS_DIR / "cb_jh_jihlava.yaml"
-    return Project.load(p) if p.exists() else Project(body=[Bod("Start", 48.97, 14.49), Bod("Cíl", 49.41, 15.60)])
+    """Výchozí projekt je prázdný – body se přidávají klikáním do mapy (ukázky jsou v seznamu projektů)."""
+    return Project(nazev="Nová trať")
 
 
 def _init_state():
@@ -419,13 +419,37 @@ def koeficienty_tab():
     with st.expander("🐢 Úseky se sníženou rychlostí"):
         o = P.omezeni
         st.caption("Optimalizace smí na krátkých úsecích snížit rychlost (menší oblouky), když tím výrazně "
-                   "ušetří nebo zachrání domy.")
+                   "ušetří nebo zachrání domy. Pravidel může být libovolně mnoho – každé řádek v tabulce: "
+                   "do jaké délky, na jakou nejnižší rychlost, kolikrát a při jaké úspoře se použije.")
         w(o, "povolit", "Povolit úseky se sníženou rychlostí", "check")
-        w(o, "max_pocet", "Max. počet úseků", min_value=0, max_value=10)
-        w(o, "max_delka_m", "Max. délka úseku [m]", min_value=500.0, max_value=10000.0, step=500.0)
-        w(o, "min_rychlost_kmh", "Nejnižší rychlost v úseku [km/h]", min_value=60.0, max_value=300.0, step=10.0)
-        w(o, "min_uspora_mil", "Použít, ušetří-li aspoň [mil. Kč]", min_value=0.0, step=50.0)
-        w(o, "min_uspora_demolic", "…nebo zachrání-li aspoň [domů]", min_value=0, max_value=1000)
+        w(o, "max_pocet", "Max. počet úseků celkem (všechna pravidla)", min_value=0, max_value=30)
+        radky = pd.DataFrame([{"Aktivní": r.aktivni, "Název": r.nazev, "Max. délka [m]": r.max_delka_m,
+                               "Nejnižší rychlost [km/h]": r.min_rychlost_kmh, "Max. počet": r.max_pocet,
+                               "Úspora ≥ [mil. Kč]": r.min_uspora_mil, "…nebo zachrání ≥ [domů]": r.min_uspora_demolic}
+                              for r in o.pravidla])
+        ed = st.data_editor(
+            radky, num_rows="dynamic", hide_index=True, width="stretch", key=f"w{WV}_pravidla_omezeni",
+            column_config={
+                "Aktivní": st.column_config.CheckboxColumn(default=True),
+                "Název": st.column_config.TextColumn(default="Nové pravidlo"),
+                "Max. délka [m]": st.column_config.NumberColumn(min_value=100, max_value=20000, step=100, default=2000),
+                "Nejnižší rychlost [km/h]": st.column_config.NumberColumn(min_value=40, max_value=300, step=5, default=80),
+                "Max. počet": st.column_config.NumberColumn(min_value=0, max_value=30, step=1, default=2),
+                "Úspora ≥ [mil. Kč]": st.column_config.NumberColumn(min_value=0, step=50, default=500),
+                "…nebo zachrání ≥ [domů]": st.column_config.NumberColumn(min_value=0, max_value=1000, step=1, default=10),
+            })
+        nova = []
+        for _, rw in ed.iterrows():
+            try:
+                nova.append(PravidloOmezeni(
+                    str(rw["Název"] or "Pravidlo"), bool(rw["Aktivní"]) if not pd.isna(rw["Aktivní"]) else True,
+                    float(rw["Max. délka [m]"]), float(rw["Nejnižší rychlost [km/h]"]), int(rw["Max. počet"]),
+                    float(rw["Úspora ≥ [mil. Kč]"]), int(rw["…nebo zachrání ≥ [domů]"])))
+            except (TypeError, ValueError):
+                continue                      # nedokončený řádek
+        o.pravidla = nova
+        st.caption("Příklad: „do 2 km až 80 km/h, jen když to ušetří ≥ 500 mil. Kč nebo zachrání ≥ 10 domů“. "
+                   "Rychlost nikdy neklesne pod nejnižší hodnotu pravidla; nikdy nepřibude žádná demolice.")
 
     with st.expander("🛤️ Souběh se stávající tratí a silnicí"):
         sb = P.soubeh

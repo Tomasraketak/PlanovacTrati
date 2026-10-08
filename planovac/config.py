@@ -110,15 +110,49 @@ class Vahy:
 
 
 @dataclass
-class Omezeni:
-    """Úseky se sníženou rychlostí, které smí optimalizace použít, když výrazně ušetří."""
+class PravidloOmezeni:
+    """Jedno pravidlo: „na úseku do ``max_delka_m`` smí rychlost klesnout až na ``min_rychlost_kmh``,
+    ušetří-li to aspoň ``min_uspora_mil`` mil. Kč nebo zachrání-li aspoň ``min_uspora_demolic`` domů“."""
 
-    povolit: bool = True
-    max_pocet: int = 4                 # nejvýše tolik úseků na celé trase
+    nazev: str = "Pravidlo"
+    aktivni: bool = True
     max_delka_m: float = 3000.0        # nejdelší úsek se sníženou rychlostí
     min_rychlost_kmh: float = 120.0    # nejnižší dovolená rychlost v úseku
+    max_pocet: int = 4                 # nejvýše tolik úseků tohoto pravidla na celé trase
     min_uspora_mil: float = 300.0      # úsek se použije, ušetří-li alespoň tolik mil. Kč …
     min_uspora_demolic: int = 5        # … nebo zachrání-li alespoň tolik domů
+
+
+def vychozi_pravidla() -> list[PravidloOmezeni]:
+    return [
+        PravidloOmezeni("Mírné snížení (do 3 km, ≥ 120 km/h)", True, 3000.0, 120.0, 4, 300.0, 5),
+        PravidloOmezeni("Silné snížení (do 2 km, až 80 km/h)", True, 2000.0, 80.0, 2, 500.0, 10),
+    ]
+
+
+@dataclass
+class Omezeni:
+    """Úseky se sníženou rychlostí, které smí optimalizace použít, když výrazně ušetří.
+
+    Pravidel může být libovolně mnoho (každé má vlastní nejdelší úsek, nejnižší rychlost, počet a prahy úspory).
+    """
+
+    povolit: bool = True
+    max_pocet: int = 6                 # nejvýše tolik úseků se sníženou rychlostí celkem (všechna pravidla)
+    pravidla: list[PravidloOmezeni] = field(default_factory=vychozi_pravidla)
+
+    def aktivni_pravidla(self) -> list[PravidloOmezeni]:
+        return [r for r in self.pravidla if r.aktivni and r.max_pocet > 0 and r.max_delka_m > 0]
+
+    @property
+    def max_delka_m(self) -> float:
+        """Nejdelší povolený úsek ze všech aktivních pravidel."""
+        return max((r.max_delka_m for r in self.aktivni_pravidla()), default=0.0)
+
+    def usek_povolen(self, delka_m: float, rychlost_kmh: float, tol: float = 1.0) -> bool:
+        """Vyhovuje úsek (délka, rychlost) alespoň jednomu aktivnímu pravidlu?"""
+        return any(delka_m <= r.max_delka_m + tol and rychlost_kmh >= r.min_rychlost_kmh - 5.0
+                   for r in self.aktivni_pravidla())
 
 
 @dataclass
@@ -218,6 +252,10 @@ VLAKY: dict[str, dict] = {
         hmotnost_t=440.0, vykon_kw=6400.0, max_tazna_sila_kn=300.0, max_rychlost_kmh=230.0,
         max_zrychleni_ms2=0.45, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=4.5, odpor_b_kn=0.040, odpor_c_kn=0.00075,
         nedostatek_prevyseni_mm=0.0),
+    "ComfortJet (Škoda 109E + 7 vozů)": dict(
+        hmotnost_t=430.0, vykon_kw=6400.0, max_tazna_sila_kn=270.0, max_rychlost_kmh=200.0,
+        max_zrychleni_ms2=0.45, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=4.4, odpor_b_kn=0.038, odpor_c_kn=0.00072,
+        nedostatek_prevyseni_mm=0.0),
     "Pendolino (ČD 680, naklápěcí)": dict(
         hmotnost_t=385.0, vykon_kw=4000.0, max_tazna_sila_kn=210.0, max_rychlost_kmh=230.0,
         max_zrychleni_ms2=0.5, brzdne_zpomaleni_ms2=0.7, odpor_a_kn=3.5, odpor_b_kn=0.030, odpor_c_kn=0.00060,
@@ -279,6 +317,23 @@ class Vypocet:
     tolerance_zjednoduseni_m: float = 150.0  # tolerance Douglas–Peucker pro vrcholy oblouků
 
 
+def _omezeni_z_dict(d: dict | None) -> Omezeni:
+    """Načte ``Omezeni``; starší projekty (jedno pravidlo v hlavní úrovni) se převedou na seznam pravidel."""
+    d = dict(d or {})
+    names_r = {f.name for f in fields(PravidloOmezeni)}
+    if "pravidla" in d and d["pravidla"] is not None:
+        pr = [PravidloOmezeni(**{k: v for k, v in (r or {}).items() if k in names_r}) for r in d["pravidla"]]
+    else:
+        pr = vychozi_pravidla()
+        for k in ("max_delka_m", "min_rychlost_kmh", "min_uspora_mil", "min_uspora_demolic"):
+            if k in d:
+                setattr(pr[0], k, d[k])
+        if "max_pocet" in d:
+            pr[0].max_pocet = int(d["max_pocet"])
+    return Omezeni(povolit=bool(d.get("povolit", True)), max_pocet=int(d.get("max_pocet", 6)) if "pravidla" in d
+                   else 6, pravidla=pr)
+
+
 @dataclass
 class Project:
     """Celý projekt trati."""
@@ -321,7 +376,7 @@ class Project:
             vahy=build(Vahy, d.get("vahy")),
             ceny=build(Ceny, d.get("ceny")),
             vlak=build(Vlak, vlak_d),
-            omezeni=build(Omezeni, d.get("omezeni")),
+            omezeni=_omezeni_z_dict(d.get("omezeni")),
             soubeh=build(Soubeh, d.get("soubeh")),
             koef=build(Koeficienty, d.get("koef")),
             linky=[build(Linka, x) for x in d["linky"]] if d.get("linky") else vychozi_linky(),
