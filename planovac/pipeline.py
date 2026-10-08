@@ -6,13 +6,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 from shapely.geometry import LineString
+from shapely.ops import unary_union
 
+from . import paralelne
 from . import soubeh as soubeh_mod
 from . import corridor, costs, dem, horizontal, omezeni, osm as osm_mod, structures, synthetic, traction, vertical
-from .config import Project
-from .costsurface import CostSurface, build_cost_surface
+from .config import TYP_STANICE, Project
+from .costsurface import CostSurface, build_cost_surfaces, siroka_mesta
 from .geo import Grid, to_lonlat, to_xy
 
 log = logging.getLogger(__name__)
@@ -45,6 +49,8 @@ class Result:
     porovnani_vlaku: list[traction.PorovnaniVlaku] = field(default_factory=list)
     soubeh: list[soubeh_mod.UsekSoubehu] = field(default_factory=list)
     matice: list[traction.BunkaMatice] = field(default_factory=list)   # vlak × linka
+    varianty: list[dict] = field(default_factory=list)     # obchvat měst × tunel pod městem
+    vystavba_tunelu_let: float = 0.0                       # orientační doba výstavby nejdelšího tunelu
     sleva_soubeh_mil: float = 0.0
 
     # ----------------------------------------------------------- souhrny
@@ -117,7 +123,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     ratio = 1 + nav.max_prodlouzeni_pct / 100.0
     xmin, ymin, xmax, ymax = _area_bounds(body_xy, ratio, vyp.okraj_km * 1000)
     res = float(vyp.rozliseni_m)
-    while (xmax - xmin) * (ymax - ymin) / res ** 2 > 16e6:
+    while (xmax - xmin) * (ymax - ymin) / res ** 2 > vyp.max_bunek_mil * 1e6:
         res *= 1.5
     if res != vyp.rozliseni_m:
         varovani.append(f"Oblast je velká – rozlišení automaticky zhrubeno na {res:.0f} m.")
@@ -139,30 +145,19 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     Rmin, Rpref = nav.min_polomer(), nav.doporuceny_polomer()
     tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
     n_seg = len(body_xy) - 1
+    n_vl = paralelne.pocet_vlaken(vyp.vlakna)
 
-    sledovatelne = osm_mod.OsmData(zeleznice=soubeh_mod.koleje_sledovatelne(osm, Rmin))
+    # parametry jednotlivých bodů: nástupiště, okruh bez penalizace zástavby, váha stanice v DP
+    delky_nast = [nav.delka_nastupiste_zastavky_m if b.je_zastavka else (nav.delka_nastupiste_m if b.je_stanice else 0.0)
+                  for b in body]
+    polomery = [nav.polomer_zastavky_m if b.je_zastavka else nav.polomer_stanice_m for b in body if b.je_stanice]
+    vahy_st = [0.25 if b.je_zastavka else 1.0 for b in body]
+    nazvy = [b.nazev for b in body]
+    demol_mil = project.vahy.demolice_optimalizace_mil(project.ceny)
+    hod_casu = project.vahy.hodnota_casu_mil_min
 
-    def prichytit(xy):
-        if not project.soubeh.povolit:
-            return xy
-        return soubeh_mod.prichytit_ke_koleji(xy, sledovatelne, 1.5 * res)
-
-    def navrh_osy(cs, f0: float, f1: float):
-        """Koridory všech úseků + směrové řešení."""
-        kor = []
-        var = []
-        for k in range(n_seg):
-            f = f0 + (f1 - f0) * k / n_seg
-            prog(f, f"Hledám koridor {body[k].nazev} → {body[k + 1].nazev} …")
-            sp = corridor.find_segment(cs.cost, grid, body_xy[k], body_xy[k + 1], nav.max_prodlouzeni_pct,
-                                       progress=lambda m, f=f: prog(f, m), prichytit=prichytit)
-            if not sp.limit_splnen:
-                var.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev}: limit prodloužení nelze splnit.")
-            kor.append(sp)
-        prog(f1, "Navrhuji směrové řešení (přímé a oblouky) …")
-        o = horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in kor], Rmin, Rpref,
-                                     Lp=nav.delka_nastupiste_m, tol=tol, ds=10.0)
-        return kor, o, var + o.varovani
+    sledovatelne = soubeh_mod.koleje_sledovatelne(osm, Rmin) if project.soubeh.povolit else []
+    prichytit = soubeh_mod.PrichytitKolej(sledovatelne, 1.5 * res) if sledovatelne else None
 
     def stahni_budovy(oblast, f):
         """Doplní budovy uvnitř (multi)polygonu ``oblast`` (metrické souřadnice)."""
@@ -178,78 +173,146 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         if new:
             osm.budovy = np.unique(np.vstack(new).round(1), axis=0)
 
-    # ------------------------------------------------------ nákladová mapa
-    prog(0.3, "Počítám nákladovou mapu (zástavba, terén, voda, chráněná území) …")
-    cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy, project.soubeh)
-    koridory, osa, var_osa = navrh_osy(cs, 0.35, 0.5)
+    def koridory_a_osa(cs, popis: str, map_fn, f0: float, f1: float):
+        """Koridory všech úseků (souběžně) + směrové řešení."""
+        var: list[str] = []
 
-    # budovy nejsou pro celou oblast -> stáhnout v pásu kolem 1. varianty a návrh zopakovat
-    if not osm.budovy_kompletni and not vyp.demo:
-        try:
-            pas1 = LineString(osa.xy).buffer(1200).simplify(150)
-            stahni_budovy(pas1, 0.52)
-            prog(0.56, "Přepočítávám nákladovou mapu s budovami a hledám trasu znovu …")
-            cs = build_cost_surface(grid, z, osm, stanice_xy, nav, project.vahy, project.soubeh)
-            koridory, osa, var_osa = navrh_osy(cs, 0.57, 0.64)
-            # části nové osy mimo prohledaný pás doplnit
-            pas2 = LineString(osa.xy).buffer(250).simplify(50).difference(pas1.buffer(-50))
-            if not pas2.is_empty and pas2.area > 1e5:
-                try:
-                    stahni_budovy(pas2, 0.66)
-                except osm_mod.OverpassError as e:
-                    varovani.append(f"{e}. Budovy na krátkých úsecích mimo první prohledaný pás chybí – "
-                                    "počet demolic tam může být podhodnocen.")
-        except osm_mod.OverpassError as e:
-            varovani.append(f"{e}. Budovy nebyly staženy – vyhýbání se domům a počet demolic jsou jen přibližné "
-                            "(podle zástavby).")
-    varovani += var_osa
-    demol_mil = project.vahy.demolice_optimalizace_mil(project.ceny)
-    nazvy = [b.nazev for b in body]
-    n_st = sum(je_stanice)
+        def jeden(k):
+            prog(f0, f"Hledám koridor {popis}{body[k].nazev} → {body[k + 1].nazev} …")
+            return corridor.find_segment(cs.cost, grid, body_xy[k], body_xy[k + 1], nav.max_prodlouzeni_pct,
+                                         progress=lambda m: prog(f0, m), prichytit=prichytit, map_fn=map_fn)
 
-    def vyhodnot(o: horizontal.Alignment) -> omezeni.Varianta:
-        """Niveleta + stavby + rozpočet + jízdní doba pro danou osu."""
-        line = LineString(o.xy)
-        s = o.s
-        z_ter = grid.sample(z, o.xy[:, 0], o.xy[:, 1]).astype(float)
-        voda, reky = structures.water_flags(line, s, osm)
-        bud = structures.building_density(o.xy, s, osm.budovy)
-        f_soub, zel, sil = soubeh_mod.faktor_osy(o.xy, osm, project.soubeh)
-        bud = np.where(zel, 0.0, bud)          # na stávající trati se nebourá
-        st_s = [bs for bs, js in zip(o.body_s, je_stanice) if js]
-        z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny, demolice_mil=demol_mil,
-                                         faktor=f_soub)
-        h = z_rail - z_ter
-        rr, cc = grid.rowcol(o.xy[:, 0], o.xy[:, 1])
-        zast_mask = cs.zastavba[rr, cc] & (cs.stanice_vyjimka[rr, cc] < 0.5) & ~zel
-        an = structures.analyze(o.xy, s, h, voda, reky, bud, osm, nav, project.ceny,
-                                stanice_xy=stanice_xy, zastavba_mask=zast_mask, demolice_mil=demol_mil,
-                                bez_demolic=zel)
-        sleva = costs.sleva_soubeh(s, h, an.typy, f_soub, nav, project.ceny)
-        rozp = costs.estimate(o.delka, s, h, an, max(n_st - 2, 0), 2, project.ceny, sleva_mil=sleva)
-        jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak)
-        nd = len(an.demolice_idx)
-        cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil) * f_soub
-        return omezeni.Varianta(osa=o, cena_mil=rozp.celkem_mil, demolice=nd,
-                                J=rozp.celkem_mil + project.vahy.penalizace_demolice_mil * project.vahy.budovy * nd,
-                                jizdni_doba_s=jizda.celkem_s,
-                                data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda, cena_m=cena_m,
-                                          soubeh=soubeh_mod.useky(s, zel, sil), sleva=sleva))
+        if map_fn is not None and n_seg > 1:
+            with ThreadPoolExecutor(max_workers=n_seg) as ex:
+                kor = list(ex.map(jeden, range(n_seg)))
+        else:
+            kor = [jeden(k) for k in range(n_seg)]
+        for k, sp in enumerate(kor):
+            if not sp.limit_splnen:
+                var.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev}: limit prodloužení nelze splnit.")
+        prog(f1, f"Navrhuji směrové řešení {popis}(přímé a oblouky) …")
+        o = fit(kor)
+        return kor, o, var + o.varovani
 
-    prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
-    zaklad = vyhodnot(osa)
-    var, useky_omez, protokol = zaklad, [], []
-    if project.omezeni.povolit and project.omezeni.max_pocet > 0:
-        prog(0.76, "Hledám místa, kde by snížená rychlost výrazně ušetřila …")
+    def fit(kor, zony=None, ref_xy=None):
+        return horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in kor], Rmin, Rpref, Lp=delky_nast,
+                                        tol=tol, ds=10.0, zony=zony, ref_xy=ref_xy)
 
-        def navrhni(zony):
-            return horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in koridory], Rmin, Rpref,
-                                            Lp=nav.delka_nastupiste_m, tol=tol, ds=10.0, zony=zony, ref_xy=osa.xy)
+    def stavba_cs(s_tunelem: bool):
+        """(základní, tunel pod městem | None) – náročné vrstvy se počítají jednou."""
+        return build_cost_surfaces(grid, z, osm, stanice_xy, nav, project.vahy, project.soubeh, project.koef,
+                                   project.ceny, polomery, s_tunelem, n_vl)
 
-        var, useky_omez, protokol = omezeni.najdi_omezeni(
-            zaklad, [k.xy for k in koridory], zaklad.data["cena_m"], res, nav, project.omezeni, navrhni, vyhodnot,
-            project.vahy.penalizace_demolice_mil, progress=lambda m: prog(0.8, m))
+    with paralelne.procesy(n_vl) as pool:
+        map_fn = paralelne.map_procesy(pool)
+        prog(0.3, f"Počítám nákladovou mapu (zástavba, terén, voda, chráněná území) – {n_vl} vláken …")
+        mesta = project.vahy.tunel_pod_mestem
+        cs_a, cs_b = stavba_cs(mesta)
+        if cs_b is not None and not siroka_mesta(cs_a.zastavba, grid.res, project.koef.tunel_min_sirka_mesta_m).any():
+            cs_b = None            # v oblasti není dost velké město – varianta s tunelem by nic nezměnila
+        kor_a, osa_a, var_a = koridory_a_osa(cs_a, "", map_fn, 0.35, 0.5)
+        kor_b = osa_b = None
+        if cs_b is not None:
+            kor_b, osa_b, var_b = koridory_a_osa(cs_b, "(tunel pod městem) ", map_fn, 0.45, 0.5)
+
+        # budovy nejsou pro celou oblast -> stáhnout v pásu kolem 1. variant a návrh zopakovat
+        if not osm.budovy_kompletni and not vyp.demo:
+            try:
+                osy = [osa_a] + ([osa_b] if osa_b is not None else [])
+                pas1 = unary_union([LineString(o.xy).buffer(1200).simplify(150) for o in osy])
+                stahni_budovy(pas1, 0.52)
+                prog(0.56, "Přepočítávám nákladovou mapu s budovami a hledám trasu znovu …")
+                cs_a, cs_b = stavba_cs(cs_b is not None)
+                kor_a, osa_a, var_a = koridory_a_osa(cs_a, "", map_fn, 0.57, 0.62)
+                if cs_b is not None:
+                    kor_b, osa_b, var_b = koridory_a_osa(cs_b, "(tunel pod městem) ", map_fn, 0.6, 0.64)
+                osy = [osa_a] + ([osa_b] if osa_b is not None else [])
+                pas2 = unary_union([LineString(o.xy).buffer(250).simplify(50) for o in osy]).difference(
+                    pas1.buffer(-50))
+                if not pas2.is_empty and pas2.area > 1e5:
+                    try:
+                        stahni_budovy(pas2, 0.66)
+                    except osm_mod.OverpassError as e:
+                        varovani.append(f"{e}. Budovy na krátkých úsecích mimo první prohledaný pás chybí – "
+                                        "počet demolic tam může být podhodnocen.")
+            except osm_mod.OverpassError as e:
+                varovani.append(f"{e}. Budovy nebyly staženy – vyhýbání se domům a počet demolic jsou jen přibližné "
+                                "(podle zástavby).")
+
+        def vyhodnot(o: horizontal.Alignment) -> omezeni.Varianta:
+            """Niveleta + stavby + rozpočet + jízdní doba pro danou osu."""
+            line = LineString(o.xy)
+            s = o.s
+            z_ter = grid.sample(z, o.xy[:, 0], o.xy[:, 1]).astype(float)
+            voda, reky = structures.water_flags(line, s, osm)
+            bud = structures.building_density(o.xy, s, osm.budovy)
+            f_soub, zel, sil = soubeh_mod.faktor_osy(o.xy, osm, project.soubeh)
+            bud = np.where(zel, 0.0, bud)          # na stávající trati se nebourá
+            rr, cc = grid.rowcol(o.xy[:, 0], o.xy[:, 1])
+            zast_os = cs_a.zastavba[rr, cc] & ~zel
+            # stanice a zastávky: poloha, délka nástupiště, váha (stanice 1, zastávka 0,25)
+            idx = [i for i, b in enumerate(body) if b.je_stanice]
+            st_s = [o.body_s[i] for i in idx]
+            st_info = [(delky_nast[i], vahy_st[i]) for i in idx]
+            st_vz = np.zeros(len(s))
+            for sx, (Lp_i, w_i) in zip(st_s, st_info):
+                m = np.abs(s - sx) <= Lp_i / 2 + 5.0
+                st_vz[m] = np.maximum(st_vz[m], w_i)
+            z_rail = vertical.design_profile(s, z_ter, voda, bud, st_s, nav, project.ceny, demolice_mil=demol_mil,
+                                             faktor=f_soub, zastavba=zast_os, stanice_info=st_info)
+            h = z_rail - z_ter
+            zast_mask = zast_os & (cs_a.stanice_vyjimka[rr, cc] < 0.5)
+            an = structures.analyze(o.xy, s, h, voda, reky, bud, osm, nav, project.ceny,
+                                    stanice_xy=stanice_xy, zastavba_mask=zast_mask, demolice_mil=demol_mil,
+                                    bez_demolic=zel, zast=zast_os, st=st_vz)
+            sleva = costs.sleva_soubeh(s, h, an.typy, f_soub, nav, project.ceny)
+            # příplatek za hloubku stanic/zastávek
+            podz = 0.0
+            for sx, (Lp_i, w_i) in zip(st_s, st_info):
+                m = np.abs(s - sx) <= Lp_i / 2
+                if m.any():
+                    podz += project.ceny.podzemni_stanice_mil_m * w_i * max(0.0, float(-h[m].min()))
+            n_zast = sum(1 for b in body[1:-1] if b.je_zastavka)
+            n_mezi = sum(1 for b in body[1:-1] if b.typ == TYP_STANICE)
+            rozp = costs.estimate(o.delka, s, h, an, n_mezi, 2, project.ceny, sleva_mil=sleva, n_zastavek=n_zast,
+                                  podzemni_mil=podz)
+            jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak)
+            nd = len(an.demolice_idx)
+            cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil, zast_os, st_vz) * f_soub
+            J = (rozp.celkem_mil + project.vahy.penalizace_demolice_mil * project.vahy.budovy * nd
+                 + hod_casu * jizda.celkem_s / 60.0)
+            return omezeni.Varianta(osa=o, cena_mil=rozp.celkem_mil, demolice=nd, J=J,
+                                    jizdni_doba_s=jizda.celkem_s,
+                                    data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda,
+                                              cena_m=cena_m, soubeh=soubeh_mod.useky(s, zel, sil), sleva=sleva))
+
+        prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
+        var_a_ev = vyhodnot(osa_a)
+        porovnani_var = [("Obchvat měst (základní)", var_a_ev)]
+        vybrana, kor, cs = var_a_ev, kor_a, cs_a
+        var_osa = var_a
+        if osa_b is not None:
+            prog(0.74, "Vyhodnocuji variantu s tunelem pod městem …")
+            var_b_ev = vyhodnot(osa_b)
+            porovnani_var.append(("Tunel pod městem", var_b_ev))
+            if var_b_ev.J < var_a_ev.J - 1e-6:
+                vybrana, kor, cs, var_osa = var_b_ev, kor_b, cs_b, var_b
+        zaklad = vybrana
+        varovani += var_osa
+        osa = vybrana.osa
+        var, useky_omez, protokol = zaklad, [], []
+        if project.omezeni.povolit and project.omezeni.max_pocet > 0:
+            prog(0.76, "Hledám místa, kde by snížená rychlost výrazně ušetřila …")
+
+            def navrhni(zony, kor=kor, osa=osa):
+                return fit(kor, zony, osa.xy)
+
+            var, useky_omez, protokol = omezeni.najdi_omezeni(
+                zaklad, [k.xy for k in kor], zaklad.data["cena_m"], res, nav, project.omezeni, navrhni, vyhodnot,
+                project.vahy.penalizace_demolice_mil, progress=lambda m: prog(0.8, m),
+                vlakna=n_vl, hodnota_casu_mil_min=hod_casu)
     osa = var.osa
+    koridory = kor
     z_ter, z_rail, an, rozp, jizda = (var.data[k] for k in ("z_ter", "z_rail", "an", "rozp", "jizda"))
     useky_soubehu, sleva_soubehu = var.data["soubeh"], var.data["sleva"]
 
@@ -267,13 +330,19 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         if d > 0 and L / d - 1 > nav.max_prodlouzeni_pct / 100 + 0.02:
             varovani.append(f"Úsek {body[k].nazev} → {body[k + 1].nazev} je po vložení oblouků "
                             f"o {100 * (L / d - 1):.1f} % delší než vzdušná čára.")
+    # orientační doba výstavby nejdelšího tunelu (ražba ze dvou portálů)
+    tun = [u.delka for u in an.objekty if u.typ in (structures.TUNEL,)]
+    vystavba = (max(tun) / 1000 / (2 * project.ceny.rychlost_razeni_km_rok) + 1.0) if tun else 0.0
+    varianty = [{"varianta": nm, "delka_km": v.osa.delka / 1000, "cena_mld": v.cena_mil / 1000,
+                 "demolice": v.demolice, "jizdni_doba_s": v.jizdni_doba_s, "J_mld": v.J / 1000,
+                 "vybrana": v is zaklad} for nm, v in porovnani_var]
     prog(1.0, "Hotovo.")
     return Result(project=project, grid=grid, dem=z, cost=cs, osm=osm, body_xy=body_xy, koridory=koridory, osa=osa,
                   z_teren=z_ter, z_kolej=z_rail, analyza=an, rozpocet=rozp, jizda=jizda, vzdusna_m=vz,
                   vzdusna_useky_m=vz_useky, varovani=varovani, trvani_s=time.time() - t0, omezeni=useky_omez,
                   omezeni_protokol=protokol, zaklad_cena_mil=zaklad.cena_mil, zaklad_demolice=zaklad.demolice,
                   porovnani_vlaku=porovnani, soubeh=useky_soubehu, sleva_soubeh_mil=sleva_soubehu,
-                  matice=matice)
+                  matice=matice, varianty=varianty, vystavba_tunelu_let=vystavba)
 
 
 def jizda_pro(r: Result, vlak_nazev: str, linka) -> traction.JizdniDoby:

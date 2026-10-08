@@ -16,6 +16,10 @@ vloží oblouky, navrhne niveletu a spočítá:
 - 🛤️ **souběh se stávající tratí** (osa do ±4 m od koleje → −50 % ceny, bez penalizací a demolic) a **se silnicí**
   (do 10 m od okraje dálnice / silnice pro motorová vozidla / I. třídy → −25 %),
 - 🚉 **linky**: zastávkový vlak, expres bez zastavení nebo rychlík jen ve vybraných stanicích – tabulka vlak × linka,
+- 🏙️ **tunel pod městem místo obchvatu** – obě varianty se porovnají podle ceny **i jízdní doby** (500 mil. Kč / min, nastavitelné),
+- 🚏 **malé zastávky** (jen zastávkové vlaky) a **podzemní stanice** (až 15 m pod terénem),
+- 🎛️ samostatná karta **Koeficienty** se všemi cenami, váhami a penalizacemi,
+- ⚡ rastr **20 m** a výpočet na **všech jádrech** procesoru,
 - 🐢 **úseky se sníženou rychlostí** (max. 4 × 3 km, min. 120 km/h) tam, kde výrazně ušetří nebo zachrání domy,
 - 📈 **podélný profil** a sklony,
 - ⬇️ export do **HTML reportu, GeoJSON, KML (Google Earth), CSV (Excel)**.
@@ -124,7 +128,9 @@ Podrobný návod: **[docs/NAVOD.md](docs/NAVOD.md)** (je i přímo v aplikaci na
 | Snížená rychlost | max. 4 úseky × 3 km, ≥ 120 km/h | použije se při úspoře ≥ 300 mil. Kč nebo ≥ 5 domech |
 | Jednotkové ceny | ČR ~2025 | tunel 1,3 mld./km, estakáda 650 mil./km, … |
 | Vlak | ICE 3 | na výběr RegioPanter, Railjet, Pendolino, ICE 3, TGV, vlastní; pobyt 90 s |
-| Rozlišení | 50 m | 100 m rychle / 25 m detail |
+| Rozlišení | 20 m | 100 m rychlý náhled / 20 m detail / 10–15 m jen s velkou RAM (≥ 32 GB) |
+| Vlákna | všechna | koridory úseků i zkoušky úseků běží souběžně |
+| Hodnota času | 500 mil. Kč/min | kolik se vyplatí za minutu jízdní doby (tunel × obchvat) |
 
 ## 💻 Příkazová řádka
 
@@ -206,6 +212,7 @@ Testy běží bez internetu na syntetickém terénu.
 
 | Problém | Řešení |
 |---|---|
+| Výpočet na 20 m je pomalý / dochází paměť | Snižte rozlišení (50 m), nebo zmenšete *max. prodloužení*; 20 m potřebuje ~6 GB RAM, 10 m přes 25 GB. Počet vláken lze omezit v *Výpočet a data*. |
 | `Python nebyl nalezen` | Nainstalujte Python z python.org a zaškrtněte *Add python.exe to PATH*, pak znovu `install.bat`. |
 | Varování *Overpass API nedostupné* | Servery OSM bývají přetížené. Výpočet doběhne bez dané vrstvy; zopakujte ho později (úspěšně stažená data zůstávají v cache). |
 | Výpočet je pomalý | Zvolte rozlišení 100 m, vypněte *Stahovat budovy v celé oblasti*, nebo zmenšete *max. prodloužení* (menší oblast). |

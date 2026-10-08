@@ -356,14 +356,23 @@ def fetch_buildings_corridor(poly_lonlat: list[tuple[float, float]], progress: P
             body, pokryto = np.zeros((0, 2)), None
     chybi = poly if pokryto is None else poly.difference(pokryto.buffer(-1))
     casti = [g for g in getattr(chybi, "geoms", [chybi]) if not g.is_empty and g.area > 2e4]
+    selhalo: list[str] = []
     for i, g in enumerate(casti):
         g = g.simplify(30).buffer(20)
         ex = np.array(g.exterior.coords)
         glon, glat = to_lonlat(ex[:, 0], ex[:, 1])
-        nove = _fetch_poly(list(zip(glon, glat)), progress, f"budovy v koridoru {i + 1}/{len(casti)}")
+        try:
+            nove = _fetch_poly(list(zip(glon, glat)), progress, f"budovy v koridoru {i + 1}/{len(casti)}")
+        except OverpassError as e:       # část se nepodařila → nepovažovat za pokrytou, pokračovat dál
+            selhalo.append(str(e))
+            continue
         body = np.unique(np.vstack([body, nove]).round(1), axis=0) if len(nove) else body
         pokryto = g if pokryto is None else pokryto.union(g)
         np.savez_compressed(store, body=body, pokryto=np.frombuffer(shapely.to_wkb(pokryto), dtype=np.uint8))
+    if selhalo and progress:
+        progress(f"Část budov se nepodařilo stáhnout ({len(selhalo)}×), výpočet pokračuje s tím, co je k dispozici.")
+    if selhalo and len(casti) == len(selhalo) and len(body) == 0:
+        raise OverpassError(selhalo[0])
     if len(body) == 0:
         return body
     uvnitr = shapely.contains_xy(poly, body[:, 0], body[:, 1])

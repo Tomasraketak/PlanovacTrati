@@ -1,22 +1,26 @@
 nazev: VRT České Budějovice – Třeboň – Jindřichův Hradec – Jihlava
-popis: Studie vysokorychlostního spojení jižních Čech a Vysočiny, 200 km/h, zastávka
-  Třeboň (žel. stanice).
+popis: Studie VRT jižních Čech a Vysočiny, 200 km/h; stanice na skutečných nádražích,
+  zastávka Levín (u Lišova) jen pro zastávkové vlaky.
 body:
 - nazev: České Budějovice
-  lat: 48.9745
-  lon: 14.488
+  lat: 48.97444
+  lon: 14.48861
   typ: stanice
+- nazev: Levín (zastávka)
+  lat: 49.011696
+  lon: 14.608498
+  typ: zastávka
 - nazev: Třeboň
   lat: 49.0153
   lon: 14.7607
   typ: stanice
 - nazev: Jindřichův Hradec
-  lat: 49.144
-  lon: 15.003
+  lat: 49.15516
+  lon: 15.0042
   typ: stanice
 - nazev: Jihlava
-  lat: 49.4155
-  lon: 15.602
+  lat: 49.4145
+  lon: 15.59939
   typ: stanice
 navrh:
   rychlost_kmh: 200.0
@@ -36,6 +40,10 @@ navrh:
   sirka_plane_m: 14.0
   sklon_svahu: 1.5
   polomer_stanice_m: 2000.0
+  delka_nastupiste_zastavky_m: 200.0
+  polomer_zastavky_m: 800.0
+  max_hloubka_stanice_m: 15.0
+  hloubka_tunelu_pod_mestem_m: 12.0
 vahy:
   obce: 1.0
   budovy: 1.0
@@ -43,6 +51,8 @@ vahy:
   voda: 1.0
   chranena_uzemi: 1.0
   delka: 1.0
+  hodnota_casu_mil_min: 500.0
+  tunel_pod_mestem: true
   penalizace_demolice_mil: 40.0
 ceny:
   trat_zaklad_mil_km: 150.0
@@ -58,6 +68,10 @@ ceny:
   krizeni_silnice_mil: 60.0
   krizeni_zeleznice_mil: 120.0
   stanice_mil: 1200.0
+  zastavka_mil: 250.0
+  podzemni_stanice_mil_m: 40.0
+  zastavba_prirazka_mil_km: 1500.0
+  rychlost_razeni_km_rok: 0.8
   koncova_stanice_mil: 2500.0
   demolice_mil_budova: 8.0
   pozemky_kc_m2: 300.0
@@ -91,8 +105,9 @@ soubeh:
   silnice_vzdalenost_m: 10.0
   silnice_sleva_pct: 25.0
   silnice_tridy: motorway,trunk,primary
+  pritahovat: false
 linky:
-- nazev: Zastávkový (všechny stanice)
+- nazev: Zastávkový (všechny stanice a zastávky)
   zastavky: []
   vsechny: true
 - nazev: Expres (bez zastavení)
@@ -102,8 +117,24 @@ linky:
   zastavky:
   - Jindřichův Hradec
   vsechny: false
+koef:
+  pen_zastavba_uvnitr: 40.0
+  pen_zastavba_pas: 8.0
+  pen_budovy: 10.0
+  pen_teren_sklon: 1.5
+  pen_teren_relief: 2.0
+  pen_voda: 6.0
+  pen_reka: 1.5
+  pen_chranena_np: 12.0
+  pen_chranena_rez: 4.0
+  pen_chranena_chko: 0.8
+  pen_soubeh_koleje_zbytek: 0.3
+  tunel_ekvivalent: 0.0
+  tunel_min_sirka_mesta_m: 800.0
 vypocet:
-  rozliseni_m: 50.0
+  rozliseni_m: 20.0
+  max_bunek_mil: 80.0
+  vlakna: 0
   demo: false
   stahovat_budovy: false
   chranena_uzemi: true

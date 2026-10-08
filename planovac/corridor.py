@@ -115,6 +115,48 @@ def _subgrid(grid: Grid, a, b, max_ratio: float, margin: float):
     return sub, (slice(r0, r1), slice(c0, c1)), d
 
 
+@dataclass
+class _Ulohy:
+    """Vše, co je potřeba k řešení jednoho úseku (picklovatelné pro výpočet v procesech)."""
+
+    c: np.ndarray            # nákladový výřez (float32, mimo elipsu inf)
+    sub: Grid
+    a: tuple[float, float]
+    b: tuple[float, float]
+    rc_a: tuple[int, int]
+    rc_b: tuple[int, int]
+    prichytit: object = None
+
+
+def reseni_lambda(u: _Ulohy, lam: float):
+    """Nejlevnější cesta pro cenu ``c + lam`` (lam = tlak na kratší trasu). Funkce na úrovni modulu,
+    aby šla spustit v jiném procesu."""
+    cl = (u.c + np.float32(lam)).astype(np.float64)
+    mcp = MCP_Geometric(cl, fully_connected=True)
+    mcp.find_costs([u.rc_a], [u.rc_b])
+    path = np.array(mcp.traceback(u.rc_b))
+    x, y = u.sub.xy(path[:, 0], path[:, 1])
+    xy = np.column_stack([x, y])
+    xy[0] = u.a
+    xy[-1] = u.b
+    xy = string_pull(xy, cl, u.sub)
+    if u.prichytit is not None:
+        xy = u.prichytit(xy)
+    L = polyline_length(xy)
+    cena = sum(_line_cost(u.c, u.sub, xy[k], xy[k + 1]) for k in range(len(xy) - 1))
+    return xy, L, cena
+
+
+def _serial_map(fn, ulohy, lams):
+    return [fn(ulohy, lam) for lam in lams]
+
+
+# vlny hodnot λ: první hrubá (geometrická řada), druhá zjemní interval mezi poslední nevyhovující a první
+# vyhovující hodnotou. Stejné vlny se počítají sériově i paralelně → výsledek nezávisí na počtu vláken.
+VLNA1 = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
+POCET_VLNA2 = 6
+
+
 def find_segment(
     cost: np.ndarray,
     grid: Grid,
@@ -123,59 +165,47 @@ def find_segment(
     max_prodlouzeni_pct: float,
     progress=None,
     prichytit=None,
+    map_fn=None,
 ) -> SegmentPath:
-    """``prichytit`` – volitelná funkce xy -> xy (např. přichycení vrcholů ke stávající koleji)."""
+    """``prichytit`` – volitelná funkce xy -> xy (např. přichycení vrcholů ke stávající koleji);
+    ``map_fn(fn, ulohy, lams)`` – paralelní mapování (výchozí sériové)."""
+    map_fn = map_fn or _serial_map
     ratio = 1.0 + max_prodlouzeni_pct / 100.0
     sub, sl, d = _subgrid(grid, a, b, ratio, margin=3 * grid.res)
-    c = cost[sl].copy()
-    X, Y = sub.cell_centers()
+    c = np.array(cost[sl], dtype=np.float32)
+    xs = (sub.x0 + (np.arange(sub.ncols) + 0.5) * sub.res).astype(np.float32)
+    ys = (sub.y0 - (np.arange(sub.nrows) + 0.5) * sub.res).astype(np.float32)
     # elipsa: |XA| + |XB| <= ratio·d (s rezervou na rastrovou cestu)
-    ell = np.hypot(X - a[0], Y - a[1]) + np.hypot(X - b[0], Y - b[1]) <= ratio * d + 2 * grid.res
-    c[~ell] = np.inf
+    da = np.hypot(xs[None, :] - np.float32(a[0]), ys[:, None] - np.float32(a[1]))
+    da += np.hypot(xs[None, :] - np.float32(b[0]), ys[:, None] - np.float32(b[1]))
+    c[da > ratio * d + 2 * grid.res] = np.inf
+    del da
     ra, ca = sub.rowcol(a[0], a[1])
     rb, cb = sub.rowcol(b[0], b[1])
-    c[ra, ca] = max(np.nan_to_num(c[ra, ca], posinf=1.0), 0.05)
-    c[rb, cb] = max(np.nan_to_num(c[rb, cb], posinf=1.0), 0.05)
+    c[ra, ca] = max(float(np.nan_to_num(c[ra, ca], posinf=1.0)), 0.05)
+    c[rb, cb] = max(float(np.nan_to_num(c[rb, cb], posinf=1.0)), 0.05)
     limit = ratio * d
+    u = _Ulohy(c, sub, a, b, (int(ra), int(ca)), (int(rb), int(cb)), prichytit)
 
-    def solve(lam: float):
-        cl = c + lam
-        mcp = MCP_Geometric(cl, fully_connected=True)
-        mcp.find_costs([(int(ra), int(ca))], [(int(rb), int(cb))])
-        path = np.array(mcp.traceback((int(rb), int(cb))))
-        x, y = sub.xy(path[:, 0], path[:, 1])
-        xy = np.column_stack([x, y])
-        xy[0] = a
-        xy[-1] = b
-        xy = string_pull(xy, cl, sub)
-        if prichytit is not None:
-            xy = prichytit(xy)
-        L = polyline_length(xy)
-        cena = sum(_line_cost(c, sub, xy[k], xy[k + 1]) for k in range(len(xy) - 1))
-        return xy, L, cena
-
-    xy, L, cena = solve(0.0)
+    xy, L, cena = map_fn(reseni_lambda, u, [0.0])[0]
     if L <= limit:
         return SegmentPath(xy, L, d, 0.0, cena, True)
 
     if progress:
         progress(f"Trasa o {100 * (L / d - 1):.0f} % delší než vzdušná čára – zkracuji …")
-    lo, hi = 0.0, 1.0
-    best = None
-    while hi <= 512:
-        xy_h, L_h, c_h = solve(hi)
-        if L_h <= limit:
-            best = (xy_h, L_h, c_h, hi)
-            break
-        lo, hi = hi, hi * 4
-    if best is None:
-        return SegmentPath(xy_h, L_h, d, hi, c_h, False)
-    for _ in range(5):
-        mid = (lo + hi) / 2
-        xy_m, L_m, c_m = solve(mid)
-        if L_m <= limit:
-            best = (xy_m, L_m, c_m, mid)
-            hi = mid
-        else:
-            lo = mid
+    res1 = map_fn(reseni_lambda, u, list(VLNA1))
+    ok = [i for i, r in enumerate(res1) if r[1] <= limit]
+    if not ok:
+        xy_h, L_h, c_h = res1[-1]
+        return SegmentPath(xy_h, L_h, d, VLNA1[-1], c_h, False)
+    i = ok[0]
+    best = (*res1[i], VLNA1[i])
+    lo = VLNA1[i - 1] if i > 0 else 0.0
+    hi = VLNA1[i]
+    if hi - lo > 1e-3:
+        lams = [lo + (hi - lo) * (k + 1) / (POCET_VLNA2 + 1) for k in range(POCET_VLNA2)]
+        res2 = map_fn(reseni_lambda, u, lams)
+        for lam, r in zip(lams, res2):
+            if r[1] <= limit and lam < best[3]:
+                best = (*r, lam)
     return SegmentPath(best[0], best[1], d, best[3], best[2], True)

@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
 from planovac import __version__
-from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
+from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
 
@@ -91,6 +91,25 @@ def w(obj, attr, label, kind="number", **kw):
     return new
 
 
+
+def odhad_rastru(P: Project) -> str:
+    """Odhad velikosti rastru a paměti podle zadaných bodů a rozlišení."""
+    try:
+        if len(P.body) < 2:
+            return ""
+        from planovac.geo import to_xy as _xy
+        from planovac.pipeline import _area_bounds
+
+        pts = [_xy(b.lon, b.lat) for b in P.body]
+        x0, y0, x1, y1 = _area_bounds(pts, 1 + P.navrh.max_prodlouzeni_pct / 100.0, P.vypocet.okraj_km * 1000)
+        n = (x1 - x0) * (y1 - y0) / P.vypocet.rozliseni_m ** 2 / 1e6
+        return (f"📐 Oblast {(x1 - x0) / 1000:.0f} × {(y1 - y0) / 1000:.0f} km → ≈ {n:.1f} mil. buněk, "
+                f"paměť ≈ {0.35 * n:.1f} GB" + (" ⚠️ nad pojistkou, rozlišení se zhrubí"
+                                               if n > P.vypocet.max_bunek_mil else ""))
+    except Exception:
+        return ""
+
+
 # ============================================================================ sidebar
 
 with st.sidebar:
@@ -143,51 +162,6 @@ with st.sidebar:
             w(n, "polomer_stanice_m", "Okruh kolem stanice bez penalizace zástavby [m]", min_value=0.0,
               max_value=6000.0, step=250.0)
 
-    with st.expander("⚖️ Priority optimalizace"):
-        st.caption("1 = výchozí důležitost, 0 = ignorovat, 5 = velmi důležité")
-        v = P.vahy
-        w(v, "obce", "🏘️ Vyhýbat se obcím bez zastávky", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
-        w(v, "budovy", "🏠 Nebourat domy (samoty, chaty)", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
-        w(v, "teren", "⛰️ Šetřit tunely, estakády a zemní práce", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
-        w(v, "voda", "🌊 Vyhýbat se vodním plochám", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
-        w(v, "chranena_uzemi", "🌲 Šetřit chráněná území", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
-        w(v, "delka", "📏 Co nejkratší trasa", "slider", min_value=0.1, max_value=5.0, step=0.1, format="%.1f")
-        w(v, "penalizace_demolice_mil", "🏚️ Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
-          step=5.0, help="Přičte se k ceně výkupu jen při hledání trasy (do rozpočtu se nezapočítá). "
-                         "Násobí se posuvníkem „Nebourat domy“.")
-
-    with st.expander("🐢 Úseky se sníženou rychlostí"):
-        o = P.omezeni
-        st.caption("Optimalizace smí na krátkých úsecích snížit rychlost (menší oblouky), když tím výrazně "
-                   "ušetří nebo zachrání domy.")
-        w(o, "povolit", "Povolit úseky se sníženou rychlostí", "check")
-        w(o, "max_pocet", "Max. počet úseků", min_value=0, max_value=10)
-        w(o, "max_delka_m", "Max. délka úseku [m]", min_value=500.0, max_value=10000.0, step=500.0)
-        w(o, "min_rychlost_kmh", "Nejnižší rychlost v úseku [km/h]", min_value=60.0, max_value=300.0, step=10.0)
-        w(o, "min_uspora_mil", "Použít, ušetří-li aspoň [mil. Kč]", min_value=0.0, step=50.0)
-        w(o, "min_uspora_demolic", "…nebo zachrání-li aspoň [domů]", min_value=0, max_value=1000)
-
-    with st.expander("💰 Jednotkové ceny"):
-        c = P.ceny
-        st.caption("mil. Kč, není-li uvedeno jinak (cenová úroveň ~2025)")
-        w(c, "trat_zaklad_mil_km", "Svršek + spodek [mil./km]", min_value=0.0, step=10.0)
-        w(c, "technologie_mil_km", "Trakce + zabezpečení [mil./km]", min_value=0.0, step=10.0)
-        w(c, "tunel_mil_km", "Ražený tunel [mil./km]", min_value=0.0, step=50.0)
-        w(c, "portal_mil", "Portály tunelu [mil./tunel]", min_value=0.0, step=10.0)
-        w(c, "hloubeny_tunel_mil_km", "Hloubený tunel [mil./km]", min_value=0.0, step=50.0)
-        w(c, "estakada_mil_km", "Estakáda [mil./km]", min_value=0.0, step=25.0)
-        w(c, "most_mil_km", "Most přes vodu [mil./km]", min_value=0.0, step=25.0)
-        w(c, "nasyp_kc_m3", "Násyp [Kč/m³]", min_value=0.0, step=25.0)
-        w(c, "vykop_kc_m3", "Výkop [Kč/m³]", min_value=0.0, step=25.0)
-        w(c, "krizeni_silnice_mil", "Křížení silnice [mil./ks]", min_value=0.0, step=5.0)
-        w(c, "krizeni_zeleznice_mil", "Křížení železnice [mil./ks]", min_value=0.0, step=5.0)
-        w(c, "stanice_mil", "Mezilehlá stanice [mil.]", min_value=0.0, step=50.0)
-        w(c, "koncova_stanice_mil", "Koncová stanice / uzel [mil.]", min_value=0.0, step=100.0)
-        w(c, "demolice_mil_budova", "Výkup + demolice budovy [mil./ks]", min_value=0.0, step=0.5)
-        w(c, "pozemky_kc_m2", "Pozemky [Kč/m²]", min_value=0.0, step=25.0)
-        w(c, "projekt_pct", "Projekce a inženýring [%]", min_value=0.0, max_value=50.0, step=1.0)
-        w(c, "rezerva_pct", "Rezerva [%]", min_value=0.0, max_value=100.0, step=5.0)
-
     with st.expander("🚆 Vlak a jízdní doby"):
         t = P.vlak
         moznosti = list(VLAKY) + [VLAK_VLASTNI]
@@ -225,20 +199,6 @@ with st.sidebar:
                 st.session_state.widget_ver += 1
                 st.rerun()
 
-    with st.expander("🛤️ Souběh se stávající tratí a silnicí"):
-        sb = P.soubeh
-        st.caption("Kde nová trať vede těsně podél stávající koleje nebo hlavní silnice, je stavba levnější.")
-        w(sb, "povolit", "Počítat se souběhem", "check")
-        w(sb, "zeleznice_tolerance_m", "Stávající trať: osa do ± [m]", min_value=0.0, max_value=50.0, step=1.0)
-        w(sb, "zeleznice_sleva_pct", "Stávající trať: sleva [%] (bez penalizací a demolic)", min_value=0.0,
-          max_value=100.0, step=5.0)
-        w(sb, "silnice_vzdalenost_m", "Silnice: osa do [m] od okraje vozovky", min_value=0.0, max_value=100.0,
-          step=1.0, help="Dálnice, silnice pro motorová vozidla a silnice I. třídy.")
-        w(sb, "silnice_sleva_pct", "Silnice: sleva [%]", min_value=0.0, max_value=100.0, step=5.0)
-        w(sb, "pritahovat", "Přitahovat trasu k souběhu už při hledání koridoru", "check",
-          help="Sleva na výsledné ose platí vždy. Přitahování v rastru 50 m nezaručí přesný souběh (±4 m) "
-               "a trasu se zvýhodněním vedenou podél silnic a tratí přes obce může i zhoršit – zkuste porovnat.")
-
     with st.expander("🚉 Linky – kde vlaky zastavují"):
         stanice_nazvy = [b.nazev for b in P.body if b.je_stanice]
         st.caption("První a poslední stanice jsou vždy. Jízdní doby všech linek uvidíte na kartě ⏱️ Jízdní doby.")
@@ -265,8 +225,12 @@ with st.sidebar:
 
     with st.expander("🖥️ Výpočet a data"):
         vy = P.vypocet
-        w(vy, "rozliseni_m", "Rozlišení rastru [m]", "select", options=[100.0, 75.0, 50.0, 35.0, 25.0],
-          help="100 m = rychlý náhled, 50 m = doporučeno, 25 m = detail (pomalé)")
+        w(vy, "rozliseni_m", "Rozlišení rastru [m]", "select", options=[100.0, 75.0, 50.0, 35.0, 25.0, 20.0, 15.0, 10.0],
+          help="100 m = rychlý náhled, 50 m = rychlý výpočet, 20 m = doporučeno (detail), 10–15 m = vyžaduje hodně RAM")
+        w(vy, "vlakna", "Počet vláken (0 = všechna)", min_value=0, max_value=64,
+          help="Koridory úseků a zkoušky úseků se sníženou rychlostí běží souběžně.")
+        w(vy, "max_bunek_mil", "Pojistka velikosti rastru [mil. buněk]", min_value=5.0, max_value=300.0, step=5.0,
+          help="Větší rastr se automaticky zhrubí. Hrubý odhad paměti: ~0,35 GB na 1 mil. buněk.")
         w(vy, "demo", "Demo režim (syntetický terén, bez internetu)", "check")
         w(vy, "stahovat_budovy", "Stahovat budovy v celé oblasti (velmi pomalé)", "check",
           help="Vypnuto: budovy se stáhnou v pásu 1,2 km kolem první varianty trasy a návrh se zopakuje – "
@@ -276,8 +240,131 @@ with st.sidebar:
         w(vy, "tolerance_zjednoduseni_m", "Tolerance zjednodušení osy [m]", min_value=20.0, max_value=1000.0, step=10.0)
         w(vy, "vlastni_dem", "Vlastní DEM (cesta ke GeoTIFF, nepovinné)", "text")
 
+    st.caption(odhad_rastru(P))
     st.markdown('<p class="small-note">Data: Copernicus DEM GLO-30, © OpenStreetMap. '
                 'Výsledky jsou orientační studie.</p>', unsafe_allow_html=True)
+
+
+
+def koeficienty_tab():
+    """Podstránka se všemi koeficienty, cenami a váhami optimalizace."""
+    st.markdown("Všechny koeficienty výpočtu na jednom místě. Změny se projeví při dalším stisknutí "
+                "**🚀 Navrhnout trať**.")
+    c1, c2 = st.columns([4, 1])
+    if c2.button("↩️ Obnovit výchozí", width="stretch", help="Vrátí váhy, ceny, koeficienty, souběh i úseky "
+                                                              "se sníženou rychlostí na výchozí hodnoty"):
+        from planovac.config import Ceny, Koeficienty, Omezeni, Soubeh, Vahy
+
+        P.vahy, P.ceny, P.koef, P.omezeni, P.soubeh = Vahy(), Ceny(), Koeficienty(), Omezeni(), Soubeh()
+        st.session_state.widget_ver += 1
+        st.rerun()
+    with st.expander("⏱️ Čas, tunely a demolice", expanded=True):
+        v, c, n = P.vahy, P.ceny, P.navrh
+        a, b = st.columns(2)
+        with a:
+            w(v, "hodnota_casu_mil_min", "Hodnota 1 minuty jízdní doby [mil. Kč/min]", min_value=0.0, max_value=5000.0,
+              step=50.0, help="Kolik se vyplatí zaplatit za zkrácení jízdní doby o minutu. Rozhoduje obchvat × tunel "
+                              "pod městem i úseky se sníženou rychlostí. Do rozpočtu se nezapočítává.")
+            w(v, "tunel_pod_mestem", "Zvažovat tunel pod městem místo obchvatu", "check")
+            w(v, "penalizace_demolice_mil", "Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
+              step=5.0)
+            w(c, "zastavba_prirazka_mil_km", "Příplatek za vedení po povrchu zástavbou [mil. Kč/km]", min_value=0.0,
+              step=100.0)
+            w(c, "rychlost_razeni_km_rok", "Postup ražby na jeden čelbu [km/rok]", min_value=0.1, max_value=3.0,
+              step=0.1, help="Jen orientační odhad doby výstavby nejdelšího tunelu.")
+        with b:
+            w(n, "hloubka_tunelu_pod_mestem_m", "Hloubka nivelety pod ulicemi u tunelu pod zástavbou [m]",
+              min_value=5.0, max_value=40.0, step=1.0)
+            w(n, "max_hloubka_stanice_m", "Stanice smí být až [m] pod terénem", min_value=0.0, max_value=40.0, step=1.0)
+            w(c, "podzemni_stanice_mil_m", "Podzemní stanice – příplatek za metr hloubky [mil. Kč]", min_value=0.0,
+              step=5.0)
+            w(c, "zastavka_mil", "Malá zastávka [mil. Kč]", min_value=0.0, step=25.0)
+            w(n, "delka_nastupiste_zastavky_m", "Nástupiště zastávky (přímá, vodorovná) [m]", min_value=50.0,
+              max_value=600.0, step=25.0)
+            w(n, "polomer_zastavky_m", "Okruh kolem zastávky bez penalizace zástavby [m]", min_value=0.0,
+              max_value=4000.0, step=100.0)
+    k = P.koef
+    with st.expander("🗺️ Nákladová mapa (relativní penalizace za metr, 1 = otevřená krajina)"):
+        a, b, c3 = st.columns(3)
+        with a:
+            st.markdown("**Zástavba a budovy**")
+            w(k, "pen_zastavba_uvnitr", "Uvnitř zástavby", min_value=0.0, step=1.0)
+            w(k, "pen_zastavba_pas", "Pás 300 m kolem zástavby", min_value=0.0, step=0.5)
+            w(k, "pen_budovy", "Hustota budov (samoty, chaty)", min_value=0.0, step=0.5)
+            w(k, "tunel_ekvivalent", "Tunel pod městem – ekvivalent (0 = z cen)", min_value=0.0, step=0.5)
+            w(k, "tunel_min_sirka_mesta_m", "Min. šířka města pro tunel [m]", min_value=100.0, step=50.0)
+        with b:
+            st.markdown("**Terén a voda**")
+            w(k, "pen_teren_sklon", "Strmý terén", min_value=0.0, step=0.1)
+            w(k, "pen_teren_relief", "Členitost (převýšení v okně 600 m)", min_value=0.0, step=0.1)
+            w(k, "pen_voda", "Vodní plocha", min_value=0.0, step=0.5)
+            w(k, "pen_reka", "Vodní tok", min_value=0.0, step=0.1)
+        with c3:
+            st.markdown("**Chráněná území a souběh**")
+            w(k, "pen_chranena_np", "NP, NPR", min_value=0.0, step=0.5)
+            w(k, "pen_chranena_rez", "Rezervace, Natura 2000", min_value=0.0, step=0.5)
+            w(k, "pen_chranena_chko", "CHKO a ostatní", min_value=0.0, step=0.1)
+            w(k, "pen_soubeh_koleje_zbytek", "Penalizace podél stávající koleje (podíl)", min_value=0.0,
+              max_value=1.0, step=0.05)
+
+    with st.expander("⚖️ Priority optimalizace", expanded=True):
+        st.caption("1 = výchozí důležitost, 0 = ignorovat, 5 = velmi důležité")
+        v = P.vahy
+        w(v, "obce", "🏘️ Vyhýbat se obcím bez zastávky", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
+        w(v, "budovy", "🏠 Nebourat domy (samoty, chaty)", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
+        w(v, "teren", "⛰️ Šetřit tunely, estakády a zemní práce", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
+        w(v, "voda", "🌊 Vyhýbat se vodním plochám", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
+        w(v, "chranena_uzemi", "🌲 Šetřit chráněná území", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
+        w(v, "delka", "📏 Co nejkratší trasa", "slider", min_value=0.1, max_value=5.0, step=0.1, format="%.1f")
+        w(v, "penalizace_demolice_mil", "🏚️ Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
+          step=5.0, help="Přičte se k ceně výkupu jen při hledání trasy (do rozpočtu se nezapočítá). "
+                         "Násobí se posuvníkem „Nebourat domy“.")
+
+    with st.expander("💰 Jednotkové ceny"):
+        c = P.ceny
+        st.caption("mil. Kč, není-li uvedeno jinak (cenová úroveň ~2025)")
+        w(c, "trat_zaklad_mil_km", "Svršek + spodek [mil./km]", min_value=0.0, step=10.0)
+        w(c, "technologie_mil_km", "Trakce + zabezpečení [mil./km]", min_value=0.0, step=10.0)
+        w(c, "tunel_mil_km", "Ražený tunel [mil./km]", min_value=0.0, step=50.0)
+        w(c, "portal_mil", "Portály tunelu [mil./tunel]", min_value=0.0, step=10.0)
+        w(c, "hloubeny_tunel_mil_km", "Hloubený tunel [mil./km]", min_value=0.0, step=50.0)
+        w(c, "estakada_mil_km", "Estakáda [mil./km]", min_value=0.0, step=25.0)
+        w(c, "most_mil_km", "Most přes vodu [mil./km]", min_value=0.0, step=25.0)
+        w(c, "nasyp_kc_m3", "Násyp [Kč/m³]", min_value=0.0, step=25.0)
+        w(c, "vykop_kc_m3", "Výkop [Kč/m³]", min_value=0.0, step=25.0)
+        w(c, "krizeni_silnice_mil", "Křížení silnice [mil./ks]", min_value=0.0, step=5.0)
+        w(c, "krizeni_zeleznice_mil", "Křížení železnice [mil./ks]", min_value=0.0, step=5.0)
+        w(c, "stanice_mil", "Mezilehlá stanice [mil.]", min_value=0.0, step=50.0)
+        w(c, "koncova_stanice_mil", "Koncová stanice / uzel [mil.]", min_value=0.0, step=100.0)
+        w(c, "demolice_mil_budova", "Výkup + demolice budovy [mil./ks]", min_value=0.0, step=0.5)
+        w(c, "pozemky_kc_m2", "Pozemky [Kč/m²]", min_value=0.0, step=25.0)
+        w(c, "projekt_pct", "Projekce a inženýring [%]", min_value=0.0, max_value=50.0, step=1.0)
+        w(c, "rezerva_pct", "Rezerva [%]", min_value=0.0, max_value=100.0, step=5.0)
+
+    with st.expander("🐢 Úseky se sníženou rychlostí"):
+        o = P.omezeni
+        st.caption("Optimalizace smí na krátkých úsecích snížit rychlost (menší oblouky), když tím výrazně "
+                   "ušetří nebo zachrání domy.")
+        w(o, "povolit", "Povolit úseky se sníženou rychlostí", "check")
+        w(o, "max_pocet", "Max. počet úseků", min_value=0, max_value=10)
+        w(o, "max_delka_m", "Max. délka úseku [m]", min_value=500.0, max_value=10000.0, step=500.0)
+        w(o, "min_rychlost_kmh", "Nejnižší rychlost v úseku [km/h]", min_value=60.0, max_value=300.0, step=10.0)
+        w(o, "min_uspora_mil", "Použít, ušetří-li aspoň [mil. Kč]", min_value=0.0, step=50.0)
+        w(o, "min_uspora_demolic", "…nebo zachrání-li aspoň [domů]", min_value=0, max_value=1000)
+
+    with st.expander("🛤️ Souběh se stávající tratí a silnicí"):
+        sb = P.soubeh
+        st.caption("Kde nová trať vede těsně podél stávající koleje nebo hlavní silnice, je stavba levnější.")
+        w(sb, "povolit", "Počítat se souběhem", "check")
+        w(sb, "zeleznice_tolerance_m", "Stávající trať: osa do ± [m]", min_value=0.0, max_value=50.0, step=1.0)
+        w(sb, "zeleznice_sleva_pct", "Stávající trať: sleva [%] (bez penalizací a demolic)", min_value=0.0,
+          max_value=100.0, step=5.0)
+        w(sb, "silnice_vzdalenost_m", "Silnice: osa do [m] od okraje vozovky", min_value=0.0, max_value=100.0,
+          step=1.0, help="Dálnice, silnice pro motorová vozidla a silnice I. třídy.")
+        w(sb, "silnice_sleva_pct", "Silnice: sleva [%]", min_value=0.0, max_value=100.0, step=5.0)
+        w(sb, "pritahovat", "Přitahovat trasu k souběhu už při hledání koridoru", "check",
+          help="Sleva na výsledné ose platí vždy. Přitahování v rastru 50 m nezaručí přesný souběh (±4 m) "
+               "a trasu se zvýhodněním vedenou podél silnic a tratí přes obce může i zhoršit – zkuste porovnat.")
 
 
 # ============================================================================= hlavička
@@ -321,7 +408,7 @@ if spustit:
 R = st.session_state.vysledek
 
 tabs = st.tabs(["🗺️ Trasa a zastávky", "🚄 Výsledek", "📈 Profil a rychlost", "🏗️ Stavby",
-                "💰 Rozpočet", "⏱️ Jízdní doby", "⬇️ Export", "❓ Nápověda"])
+                "💰 Rozpočet", "⏱️ Jízdní doby", "🎛️ Koeficienty", "⬇️ Export", "❓ Nápověda"])
 
 
 # ========================================================================= tab: zadání
@@ -350,9 +437,10 @@ with tabs[0]:
         c1, c2 = st.columns([3, 1])
         with c1:
             rezim = st.segmented_control(
-                "Klik do mapy", ["🚉 Stanice", "◆ Průjezdní bod", "✋ Vybrat bod"], default=ss.rezim,
-                key=f"rezim_{ss.body_ver}", help="🚉 přidá stanici (vlak zastaví) · ◆ přidá průjezdní bod "
-                "(trať jím povede, vlak nezastaví) · ✋ klikem na značku bod vyberete a upravíte")
+                "Klik do mapy", ["🚉 Stanice", "🚏 Zastávka", "◆ Průjezdní bod", "✋ Vybrat bod"], default=ss.rezim,
+                key=f"rezim_{ss.body_ver}", help="🚉 stanice (zastaví všechny vlaky podle linky) · 🚏 malá zastávka (kratší "
+                "nástupiště, levnější; typicky jen zastávkové vlaky) · ◆ průjezdní bod (trať jím povede, vlak "
+                "nezastaví) · ✋ klikem na značku bod vyberete a upravíte")
             ss.rezim = rezim or ss.rezim
         with c2:
             if st.button("↩️ Zpět", width="stretch", disabled=not ss.historie, help="Vrátit poslední změnu bodů"):
@@ -387,7 +475,11 @@ with tabs[0]:
             vybran = ss.vybrany == i - 1
             okraj = "#e74c3c" if vybran else "#fff"
             vel = 32 if vybran else 26
-            if b.je_stanice:
+            if b.je_zastavka:
+                tvar = (f"background:#27ae60;border-radius:4px;width:{vel - 2}px;height:{vel - 2}px;"
+                        f"line-height:{vel - 6}px")
+                obsah = str(i)
+            elif b.je_stanice:
                 tvar = (f"background:#1e3c72;border-radius:50%;width:{vel}px;height:{vel}px;"
                         f"line-height:{vel - 4}px")
                 obsah = str(i)
@@ -407,7 +499,7 @@ with tabs[0]:
         out = st_folium(m, height=560, use_container_width=True,
                         returned_objects=["last_clicked", "last_object_clicked"],
                         key=f"mapa_vstup_{ss.body_ver}")
-        st.markdown('<span class="small-note">🔵 stanice (vlak zastaví) · 🔶 průjezdní bod (trať vede přes '
+        st.markdown('<span class="small-note">🔵 stanice · 🟩 zastávka (jen zastávkové vlaky) · 🔶 průjezdní bod (trať vede přes '
                     'bod, vlak nezastaví) · čárkovaně spojnice v pořadí jízdy · červeně navržená trať</span>',
                     unsafe_allow_html=True)
 
@@ -434,7 +526,8 @@ with tabs[0]:
                 ss.presun = False
                 zmen_body(nove, ss.vybrany)
             elif not ss.rezim.startswith("✋"):
-                typ = TYP_STANICE if ss.rezim.startswith("🚉") else TYP_PRUJEZD
+                typ = (TYP_STANICE if ss.rezim.startswith("🚉") else TYP_ZASTAVKA if ss.rezim.startswith("🚏")
+                       else TYP_PRUJEZD)
                 from planovac.osm import nejblizsi_obec
 
                 with st.spinner("Přidávám bod …"):
@@ -447,12 +540,13 @@ with tabs[0]:
             i = ss.vybrany
             b = P.body[i]
             with st.container(border=True):
-                st.markdown(f"**{'🚉' if b.je_stanice else '🔶'} Vybraný bod {i + 1}:** {b.lat:.5f}, {b.lon:.5f}")
+                st.markdown(f"**{'🚏' if b.je_zastavka else '🚉' if b.je_stanice else '🔶'} Vybraný bod {i + 1}:** "
+                            f"{b.lat:.5f}, {b.lon:.5f} · {b.typ}")
                 novy_nazev = st.text_input("Název", b.nazev, key=f"vyb_nazev_{ss.body_ver}")
                 if novy_nazev != b.nazev:
                     P.body[i] = Bod(novy_nazev, b.lat, b.lon, b.typ)
                 c = st.columns(3)
-                if c[0].button("🔶 Na průjezdní" if b.je_stanice else "🚉 Na stanici", width="stretch"):
+                if c[0].button("🔁 Změnit typ", width="stretch", help="stanice → zastávka → průjezdní bod"):
                     zmen_body(body_mod.prepni_typ(P.body, i), i)
                 if c[1].button("📍 Přesunout", width="stretch", help="Další klik do mapy bod přesune"):
                     ss.presun = True
@@ -484,9 +578,9 @@ with tabs[0]:
                     st.error(f"Vyhledávání selhalo: {e}")
             if ss.hledani:
                 vysl = st.selectbox("Výsledky", ss.hledani, format_func=lambda d: d["nazev"][:90])
-                c1, c2 = st.columns(2)
-                for col, typ, popis in ((c1, TYP_STANICE, "🚉 Přidat jako stanici"),
-                                        (c2, TYP_PRUJEZD, "🔶 Jako průjezdní bod")):
+                c1, c2, c3 = st.columns(3)
+                for col, typ, popis in ((c1, TYP_STANICE, "🚉 Stanice"), (c2, TYP_ZASTAVKA, "🚏 Zastávka"),
+                                        (c3, TYP_PRUJEZD, "🔶 Průjezdní")):
                     if col.button(popis, width="stretch", key=f"hl_{typ}"):
                         nazev = vysl["nazev"].split(",")[0]
                         nove, i = body_mod.pridej(P.body, vysl["lat"], vysl["lon"], typ,
@@ -527,8 +621,9 @@ with tabs[0]:
             d = [float(np.hypot(b[0] - a[0], b[1] - a[1])) / 1000 for a, b in zip(xy[:-1], xy[1:])]
             st.info(f"Vzdušnou čarou přes všechny body: **{sum(d):.1f} km** "
                     f"(max. délka trati ≈ {sum(d) * (1 + P.navrh.max_prodlouzeni_pct / 100):.1f} km). "
-                    f"Stanic: {sum(b.je_stanice for b in P.body)}, průjezdních bodů: "
-                    f"{sum(not b.je_stanice for b in P.body)}.")
+                    f"Stanic: {sum(b.typ == TYP_STANICE for b in P.body)}, zastávek: "
+                    f"{sum(b.je_zastavka for b in P.body)}, průjezdních bodů: "
+                    f"{sum(b.typ == TYP_PRUJEZD for b in P.body)}.")
         for ch in P.validate():
             st.warning(ch)
 
@@ -611,6 +706,16 @@ with tabs[3]:
             st.dataframe(report.tab_useky_typy(R), hide_index=True, width="stretch")
         with c2:
             st.plotly_chart(report.fig_objekty(R), width="stretch", key="pl_objekty")
+        st.subheader("🏙️ Varianty koridoru: obchvat měst × tunel pod městem")
+        if len(R.varianty) > 1:
+            st.dataframe(report.tab_varianty(R), hide_index=True, width="stretch")
+            st.caption(f"Rozhoduje kritérium J = cena + penalizace demolic + {R.project.vahy.hodnota_casu_mil_min:.0f} "
+                       "mil. Kč za každou minutu jízdní doby (nastavení na kartě 🎛️ Koeficienty).")
+        else:
+            st.write("V oblasti není dost velká zástavba, nebo je tunel pod městem vypnutý – porovnání se neprovádí.")
+        if R.vystavba_tunelu_let > 0:
+            st.info(f"⏳ Orientační doba výstavby nejdelšího tunelu ≈ {R.vystavba_tunelu_let:.1f} roku "
+                    "(informativní, do rozhodování nevstupuje).")
         st.subheader("🛤️ Souběh se stávající tratí a silnicemi")
         if R.soubeh:
             st.dataframe(report.tab_soubeh(R), hide_index=True, width="stretch")
@@ -711,6 +816,9 @@ with tabs[5]:
         st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
 
 with tabs[6]:
+    koeficienty_tab()
+
+with tabs[7]:
     if R is None:
         _no_result()
     else:
@@ -744,6 +852,6 @@ with tabs[6]:
         st.subheader("Souhrn")
         st.code(report.souhrn_text(R), language=None)
 
-with tabs[7]:
+with tabs[8]:
     navod = ROOT / "docs" / "NAVOD.md"
     st.markdown(navod.read_text(encoding="utf-8") if navod.exists() else "Návod nenalezen (docs/NAVOD.md).")

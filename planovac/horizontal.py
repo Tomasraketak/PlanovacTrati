@@ -77,7 +77,8 @@ def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref) -> list[_PI]:
             raw.append((path[k], None))
         raw.append((np.asarray(points_xy[i + 1], float), i + 1))
 
-    half = [Lp / 2 if je_stanice[j] else 0.0 for j in range(n)]
+    Lps = list(Lp) if hasattr(Lp, "__len__") else [Lp] * n      # délka nástupiště po bodech
+    half = [Lps[j] / 2 if je_stanice[j] else 0.0 for j in range(n)]
     # vzdálenost pomocných vrcholů od bodu: polovina nástupiště + tečna oblouku
     # (bod rozdělí lom osy na dva oblouky, každý s úhlem ~ Δ/2)
     idx_of = [k for k, (_, j) in enumerate(raw) if j is not None]

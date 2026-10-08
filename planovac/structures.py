@@ -134,8 +134,9 @@ def building_density(xy: np.ndarray, s: np.ndarray, budovy: np.ndarray, radius: 
 # ------------------------------------------------------------------ klasifikace
 
 def classify(h: np.ndarray, s: np.ndarray, voda: np.ndarray, bud_na_m: np.ndarray,
-             navrh: NavrhoveParametry, ceny: Ceny, demolice_mil: float | None = None) -> np.ndarray:
-    costs = option_costs(h, navrh, ceny, voda, bud_na_m, demolice_mil)
+             navrh: NavrhoveParametry, ceny: Ceny, demolice_mil: float | None = None,
+             zast=False, st=0.0) -> np.ndarray:
+    costs = option_costs(h, navrh, ceny, voda, bud_na_m, demolice_mil, zast, st)
     best = np.argmin(costs, axis=0)
     t = np.where(np.abs(h) < 1.5, UROVEN, np.where(h > 0, NASYP, ZAREZ))
     t = np.where(best == 1, ESTAKADA, t)
@@ -168,9 +169,9 @@ def classify(h: np.ndarray, s: np.ndarray, voda: np.ndarray, bud_na_m: np.ndarra
 def analyze(xy, s, h, voda, reky, bud_na_m, osm: OsmData, navrh: NavrhoveParametry, ceny: Ceny,
             stanice_xy: list[tuple[float, float]] | None = None,
             zastavba_mask: np.ndarray | None = None, demolice_mil: float | None = None,
-            bez_demolic: np.ndarray | None = None) -> Analyza:
+            bez_demolic: np.ndarray | None = None, zast=False, st=0.0) -> Analyza:
     """``bez_demolic`` – maska vzorků (souběh se stávající tratí), kde se nic nebourá."""
-    t = classify(h, s, voda, bud_na_m, navrh, ceny, demolice_mil)
+    t = classify(h, s, voda, bud_na_m, navrh, ceny, demolice_mil, zast, st)
     line = LineString(xy)
 
     useky = []

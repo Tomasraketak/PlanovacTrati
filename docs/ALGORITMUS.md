@@ -72,6 +72,21 @@ ve stanicích srovná do vodorovné a znovu se vynutí max. sklon.
 - **Hluk**: budovy do 100 m od osy mimo tunely.
 - **Křížení**: průsečíky osy se silnicemi, železnicemi a řekami; v tunelu nebo pod estakádou bez nového objektu.
 
+## 6b. Tunel pod městem, zastávky, podzemní stanice
+- V široké zástavbě (kruh o průměru ≥ 800 m, morfologické otevření přes vzdálenostní transformaci) lze nákladovou
+  mapu spočítat ve variantě „tunel“: penalizace za vedení městem se nahradí příplatkem za tunel (`tunel_mil_km /
+  (svršek + technologie)` ≈ 6). Pro obě varianty se najde koridor a osa, obě se vyhodnotí a vyhraje nižší
+  **J = cena + penalizace demolic + hodnota minuty × jízdní doba**.
+- Ve výškovém řešení mají povrchové varianty v zástavbě příplatek (vykoupení území), a tunel je tam dovolen už od
+  menší hloubky (12 m). Tím se tunel vyplatí i tehdy, když ho nevyžaduje výškový profil.
+- **Stanice** (váha 1) a **zastávky** (váha 0,25): nástupiště vodorovně, hloubka pod terénem ≤ 15 m, příplatek
+  `podzemní_stanice_mil_m × váha × hloubka`.
+
+## 6c. Paralelní výpočet
+Koridory jednotlivých úseků běží souběžně a hledání délkově omezené trasy (λ) se řeší po vlnách (8 + 6 hodnot λ
+najednou) v procesech (Dijkstra drží GIL). Zkoušky úseků se sníženou rychlostí a hodnocení variant běží ve vláknech.
+Sériový a paralelní výpočet dávají stejný výsledek (stejné vlny λ).
+
 ## 7a. Souběh se stávající tratí a silnicemi (`soubeh.py`)
 - Volitelně (*Přitahovat trasu k souběhu*, výchozí vypnuto) nákladová mapa: buňky se sledovatelnou
   (dost přímou, R ≥ R_min) stávající kolejí mají cenu ×0,5 a žádné penalizace (zástavba, budovy, chráněná území);

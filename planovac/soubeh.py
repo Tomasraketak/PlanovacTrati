@@ -148,3 +148,16 @@ def useky(s: np.ndarray, zel: np.ndarray, sil: np.ndarray, min_delka: float = 50
             if s1 - s0 >= min_delka:
                 out.append(UsekSoubehu(druh, s0, s1))
     return sorted(out, key=lambda u: u.s0)
+
+
+class PrichytitKolej:
+    """Picklovatelný objekt: přichytí vrcholy lomené čáry ke koleji (pro výpočet v jiných procesech)."""
+
+    def __init__(self, koleje_linie: list, max_vzdalenost: float):
+        self.osm = OsmData(zeleznice=list(koleje_linie))
+        self.max_vzdalenost = max_vzdalenost
+
+    def __call__(self, xy: np.ndarray) -> np.ndarray:
+        if not self.osm.zeleznice:
+            return xy
+        return prichytit_ke_koleji(xy, self.osm, self.max_vzdalenost)

@@ -50,6 +50,23 @@ na přímost.
 Všechny ceny jsou editovatelné (mil. Kč za km / kus, Kč za m³ / m²). Výchozí hodnoty odpovídají řádově
 cenové úrovni ČR ~2025.
 
+### 🎛️ Karta Koeficienty
+Všechny ceny, váhy a penalizace jsou na jedné kartě: hodnota minuty jízdní doby, penalizace demolic, tunel pod
+městem, podzemní stanice, malé zastávky, ceny staveb, souběh, úseky se sníženou rychlostí a koeficienty
+nákladové mapy (zástavba, budovy, terén, voda, chráněná území). *Obnovit výchozí* vrátí původní hodnoty.
+
+### 🏙️ Tunel pod městem
+Kde město stojí v cestě, program porovná dvě varianty: **obchvat** (trasa město objede, je delší a pomalejší)
+a **tunel** (pod zástavbou, dražší). Rozhoduje součet *cena + penalizace demolic + hodnota minuty × jízdní doba*
+(výchozí 500 mil. Kč za minutu). Tunel se zvažuje jen pod dostatečně velkou zástavbou (≥ 800 m) – kratší nevyjde
+kvůli rampám při daném sklonu. Orientační doba výstavby tunelu se jen zobrazí, do rozhodování nevstupuje.
+
+### 🚏 Zastávky a podzemní stanice
+- **Zastávka** je malá stanice (kratší nástupiště, levnější) – typicky ji obsluhují jen zastávkové vlaky;
+  rychlík a expres v ní nestaví (nastavuje se v *Linky*).
+- **Stanice i zastávky smí být až 15 m pod terénem** (nastavitelné); každý metr hloubky se připlácí. Program
+  stanici zahloubí sám, pokud je to levnější než násyp nebo estakáda (např. pod městem).
+
 ### 🛤️ Souběh se stávající tratí a silnicí
 - Kde osa nové trati vede **do ±4 m od stávající koleje**, využije se stávající těleso a pozemky: stavba je
   **o 50 % levnější** a v tom místě se nepočítají penalizace za zástavbu, domy ani chráněná území (nic se nebourá).
@@ -84,7 +101,9 @@ výchozích **90 s**. Po výpočtu ukazuje karta *⏱️ Jízdní doby* **porovn
 z nich – bez nutnosti přepočítávat trať.
 
 ### 🖥️ Výpočet a data
-- **Rozlišení rastru**: 100 m = rychlý náhled, **50 m = doporučeno**, 25 m = detail (pomalejší, víc paměti).
+- **Rozlišení rastru**: 100 m = rychlý náhled, 50 m = rychlé, **20 m = doporučeno** (detail), 10–15 m jen s velkou RAM.
+  Pod volbou je odhad počtu buněk a paměti. Výpočet běží na všech jádrech (*Počet vláken*). Zdrojový výškový
+  model má 30 m, takže 20 m zpřesňuje hlavně polohu osy a obcházení zástavby; skutečný detail terénu dá vlastní DMR 5G.
 - **Demo režim**: syntetický terén bez internetu.
 - **Stahovat budovy v celé oblasti**: standardně vypnuto – program nejdřív najde trasu podle zástavby, pak stáhne
   budovy v pásu 1,2 km kolem ní a návrh zopakuje už s ohledem na jednotlivé domy. Zapnutí stáhne budovy v celé

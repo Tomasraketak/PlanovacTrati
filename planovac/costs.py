@@ -52,7 +52,7 @@ def sleva_soubeh(s: np.ndarray, h: np.ndarray, typy: np.ndarray, faktor: np.ndar
 
 
 def estimate(delka_m: float, s: np.ndarray, h: np.ndarray, an: Analyza, n_mezilehlych: int, n_koncovych: int,
-             ceny: Ceny, sleva_mil: float = 0.0) -> Rozpocet:
+             ceny: Ceny, sleva_mil: float = 0.0, n_zastavek: int = 0, podzemni_mil: float = 0.0) -> Rozpocet:
     km = delka_m / 1000.0
     P: list[Polozka] = []
 
@@ -92,6 +92,10 @@ def estimate(delka_m: float, s: np.ndarray, h: np.ndarray, an: Analyza, n_mezile
     n_zel = sum(1 for k in an.krizeni if k.druh == "železnice" and k.reseni.startswith("mimoúrovňové"))
     add("Křížení železnic", n_zel, "ks", ceny.krizeni_zeleznice_mil, n_zel * ceny.krizeni_zeleznice_mil)
     add("Mezilehlé stanice", n_mezilehlych, "ks", ceny.stanice_mil, n_mezilehlych * ceny.stanice_mil)
+    if n_zastavek:
+        add("Malé zastávky", n_zastavek, "ks", ceny.zastavka_mil, n_zastavek * ceny.zastavka_mil)
+    if podzemni_mil > 0:
+        add("Podzemní stanice / zastávky (příplatek za hloubku)", 1, "", podzemni_mil, podzemni_mil)
     add("Koncové stanice / napojení uzlů", n_koncovych, "ks", ceny.koncova_stanice_mil,
         n_koncovych * ceny.koncova_stanice_mil)
     nd = len(an.demolice_idx)

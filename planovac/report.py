@@ -69,6 +69,10 @@ def souhrn(r: Result) -> dict:
         "omezeni_uspora_mil": r.zaklad_cena_mil - r.rozpocet.celkem_mil,
         "omezeni_demolic_mene": r.zaklad_demolice - len(an.demolice_idx),
         "vlak": r.project.vlak.nazev,
+        "vystavba_tunelu_let": r.vystavba_tunelu_let,
+        "podzemni_stanice": sum(1 for b, bs in zip(r.project.body, r.osa.body_s)
+                                if b.je_stanice and r.z_teren[min(int(np.searchsorted(r.osa.s, bs)), len(r.osa.s) - 1)]
+                                - r.z_kolej[min(int(np.searchsorted(r.osa.s, bs)), len(r.osa.s) - 1)] > 1.0),
         "soubeh_zel_km": sum(u.delka for u in r.soubeh if u.druh == "stávající trať") / 1000,
         "soubeh_sil_km": sum(u.delka for u in r.soubeh if u.druh == "silnice") / 1000,
         "sleva_soubeh_mil": r.sleva_soubeh_mil,
@@ -95,6 +99,14 @@ def souhrn_text(r: Result) -> str:
                      f"(úspora {uspora} mil. Kč, demolic o {s['omezeni_demolic_mene']} méně)")
         for u in r.omezeni:
             lines.append(f"  • km {u.s0 / 1000:.1f}–{u.s1 / 1000:.1f}: {u.rychlost_kmh:.0f} km/h (R {u.min_polomer_m:.0f} m)")
+    if r.varianty and len(r.varianty) > 1:
+        lines.append("Varianty koridoru (kritérium J = cena + demolice + čas):")
+        for v in r.varianty:
+            lines.append(f"  • {v['varianta']}: {v['delka_km']:.1f} km, {v['cena_mld']:.1f} mld. Kč, "
+                         f"{v['demolice']} demolic, {fmt_cas(v['jizdni_doba_s'])}, J {v['J_mld']:.1f}"
+                         f"{'  ← vybrána' if v['vybrana'] else ''}")
+    if s["vystavba_tunelu_let"] > 0:
+        lines.append(f"Orientační doba výstavby nejdelšího tunelu: {s['vystavba_tunelu_let']:.1f} roku")
     if r.soubeh:
         lines.append(f"Souběh: se stávající tratí {s['soubeh_zel_km']:.1f} km, se silnicí {s['soubeh_sil_km']:.1f} km "
                      f"(sleva {s['sleva_soubeh_mil']:.0f} mil. Kč)")
@@ -241,6 +253,15 @@ def tab_soubeh(r: Result) -> pd.DataFrame:
                           "Délka [m]": round(u.delka)} for u in r.soubeh])
 
 
+def tab_varianty(r: Result) -> pd.DataFrame:
+    """Porovnání variant koridoru: obchvat měst × tunel pod městem (cena + čas + demolice)."""
+    return pd.DataFrame([{"Varianta": v["varianta"], "Délka [km]": round(v["delka_km"], 1),
+                          "Cena [mld. Kč]": round(v["cena_mld"], 2), "Demolice": v["demolice"],
+                          "Jízdní doba": fmt_cas(v["jizdni_doba_s"]),
+                          "Kritérium J [mld. Kč]": round(v["J_mld"], 2), "Vybrána": "✔" if v["vybrana"] else ""}
+                         for v in r.varianty])
+
+
 def tab_krizeni(r: Result) -> pd.DataFrame:
     return pd.DataFrame([{"km": round(k.s / 1000, 3), "Druh": k.druh, "Název": k.nazev, "Řešení": k.reseni}
                          for k in r.analyza.krizeni])
@@ -380,10 +401,15 @@ def build_map(r: Result, cost_layer: bool = True, fit: bool = True):
         i = min(i, len(s) - 1)
         if b.je_stanice:
             pr, od = jr.get(b.nazev, (np.nan, np.nan))
-            popup = (f"<b>🚉 {html.escape(b.nazev)}</b><br>km {bs / 1000:.2f}<br>niveleta {r.z_kolej[i]:.0f} m n. m."
+            hloubka = float(r.z_teren[i] - r.z_kolej[i])
+            pod = f"<br>⬇️ pod terénem {hloubka:.0f} m" if hloubka > 1 else ""
+            popup = (f"<b>{'🚏' if b.je_zastavka else '🚉'} {html.escape(b.nazev)}</b> "
+                     f"({'zastávka' if b.je_zastavka else 'stanice'})<br>km {bs / 1000:.2f}"
+                     f"<br>niveleta {r.z_kolej[i]:.0f} m n. m.{pod}"
                      f"<br>příjezd {fmt_cas(pr)} | odjezd {fmt_cas(od)}")
             folium.Marker([b.lat, b.lon], tooltip=b.nazev, popup=folium.Popup(popup, max_width=260),
-                          icon=folium.Icon(color="darkblue", icon="train", prefix="fa")).add_to(m)
+                          icon=folium.Icon(color="green" if b.je_zastavka else "darkblue",
+                                           icon="pause" if b.je_zastavka else "train", prefix="fa")).add_to(m)
         else:
             folium.CircleMarker([b.lat, b.lon], radius=7, color="#2c3e50", fill=True, fill_color="#f1c40f",
                                 fill_opacity=1, tooltip=f"Průjezdní bod: {b.nazev} (km {bs / 1000:.2f})").add_to(m)
@@ -461,7 +487,7 @@ def fig_profil(r: Result):
                                  connectgaps=False, hovertemplate="km %{x:.2f}<br>niveleta %{y:.1f} m<extra>" + NAZVY[t] + "</extra>"))
     for b, bs in zip(r.project.body, r.osa.body_s):
         fig.add_vline(x=bs / 1000, line=dict(color="#34495e", dash="dot", width=1))
-        fig.add_annotation(x=bs / 1000, y=1.02, yref="paper", text=("🚉 " if b.je_stanice else "◆ ") + b.nazev,
+        fig.add_annotation(x=bs / 1000, y=1.02, yref="paper", text=("🚏 " if b.je_zastavka else "🚉 " if b.je_stanice else "◆ ") + b.nazev,
                            showarrow=False, font=dict(size=11))
     fig.update_layout(height=430, margin=dict(l=50, r=20, t=40, b=40), hovermode="x unified",
                       xaxis_title="staničení [km]", yaxis_title="nadmořská výška [m]",
@@ -668,6 +694,8 @@ min. poloměr {r.project.navrh.min_polomer():.0f} m · vygenerováno {datetime.n
 <section><h2>Rozpočet (orientační)</h2>{tbl(tab_rozpocet(r))}</section>
 <section><h2>Jízdní řád – {html.escape(r.project.vlak.nazev)}</h2>{tbl(tab_jizdni_rad(r))}<h3>Úseky</h3>{tbl(tab_useky_jizdy(r))}
 <h3>Porovnání vlaků</h3>{tbl(tab_porovnani_vlaku(r))}<h3>Vlak × linka (celkové jízdní doby)</h3>{tbl(tab_matice(r))}</section>
+<section><h2>Varianty koridoru: obchvat × tunel pod městem</h2>
+<p>Kritérium J = cena + penalizace demolic + {r.project.vahy.hodnota_casu_mil_min:.0f} mil. Kč × minuty jízdní doby.</p>{tbl(tab_varianty(r))}</section>
 <section><h2>Souběh se stávající tratí a silnicemi</h2><p>Sleva {r.sleva_soubeh_mil:,.0f} mil. Kč</p>{tbl(tab_soubeh(r))}</section>
 <section><h2>Úseky se sníženou rychlostí</h2>{tbl(tab_omezeni(r))}</section>
 <section><h2>Prodloužení proti vzdušné čáře</h2>{tbl(tab_prodlouzeni(r))}</section>

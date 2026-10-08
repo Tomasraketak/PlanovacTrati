@@ -13,8 +13,9 @@ from typing import Any
 import yaml
 
 TYP_STANICE = "stanice"          # vlak zastavuje, okolí obce není penalizováno
+TYP_ZASTAVKA = "zastávka"        # malá zastávka (kratší nástupiště, levnější) – typicky jen zastávkové vlaky
 TYP_PRUJEZD = "průjezdní bod"    # trasa musí projít bodem, vlak nezastavuje
-TYPY_BODU = (TYP_STANICE, TYP_PRUJEZD)
+TYPY_BODU = (TYP_STANICE, TYP_ZASTAVKA, TYP_PRUJEZD)
 
 
 @dataclass
@@ -28,7 +29,12 @@ class Bod:
 
     @property
     def je_stanice(self) -> bool:
-        return self.typ == TYP_STANICE
+        """Zastavovací bod = stanice nebo zastávka (průjezdní bod ne)."""
+        return self.typ in (TYP_STANICE, TYP_ZASTAVKA)
+
+    @property
+    def je_zastavka(self) -> bool:
+        return self.typ == TYP_ZASTAVKA
 
 
 @dataclass
@@ -52,6 +58,10 @@ class NavrhoveParametry:
     sirka_plane_m: float = 14.0            # šířka pláně dvoukolejné trati
     sklon_svahu: float = 1.5               # sklon svahů násypu/zářezu 1:n
     polomer_stanice_m: float = 2000.0      # okruh kolem stanice bez penalizace zástavby
+    delka_nastupiste_zastavky_m: float = 200.0  # přímá a vodorovná část u malé zastávky
+    polomer_zastavky_m: float = 800.0      # okruh kolem zastávky bez penalizace zástavby
+    max_hloubka_stanice_m: float = 15.0    # stanice/zastávka smí být až tolik metrů pod terénem
+    hloubka_tunelu_pod_mestem_m: float = 12.0  # min. hloubka nivelety pod ulicemi u tunelu pod zástavbou
 
     def min_polomer(self) -> float:
         """Minimální poloměr oblouku R = 11,8·V² / (D + I)."""
@@ -80,6 +90,9 @@ class Vahy:
     voda: float = 1.0          # vodní plochy a řeky (=> mosty)
     chranena_uzemi: float = 1.0  # CHKO, NP, rezervace, Natura 2000
     delka: float = 1.0         # tlak na co nejkratší trasu
+    hodnota_casu_mil_min: float = 500.0    # kolik mil. Kč „vyplatí“ 1 minuta jízdní doby (rozhodování
+    #                                        obchvat × tunel, úseky se sníženou rychlostí) – nejde do rozpočtu
+    tunel_pod_mestem: bool = True          # zvažovat tunel pod městem místo obchvatu
     penalizace_demolice_mil: float = 40.0  # společenská „cena“ zbourání domu – jen pro optimalizaci,
     #                                        do rozpočtu se nezapočítává (násobí se vahou „budovy“)
 
@@ -116,7 +129,12 @@ class Ceny:
     hloubeny_tunel_mil_km: float = 900.0   # hloubený tunel / galerie
     krizeni_silnice_mil: float = 60.0      # nadjezd / podjezd
     krizeni_zeleznice_mil: float = 120.0
-    stanice_mil: float = 1200.0            # mezilehlá stanice / zastávka
+    stanice_mil: float = 1200.0            # mezilehlá stanice
+    zastavka_mil: float = 250.0            # malá zastávka (jen zastávkové vlaky)
+    podzemni_stanice_mil_m: float = 40.0   # příplatek za každý metr hloubky stanice pod terénem (zastávka ×0,25)
+    zastavba_prirazka_mil_km: float = 1500.0  # příplatek za vedení po povrchu zástavbou (vykoupení, rozdělení
+    #                                           území) – tunel pod městem se tak vyplatí i bez výškové potřeby
+    rychlost_razeni_km_rok: float = 0.8    # orientační postup ražby (jen odhad doby výstavby v souhrnu)
     koncova_stanice_mil: float = 2500.0    # napojení na uzel / koncová stanice
     demolice_mil_budova: float = 8.0       # výkup + demolice jedné budovy
     pozemky_kc_m2: float = 300.0
@@ -140,6 +158,27 @@ class Soubeh:
 
 # poloviční šířka vozovky [m] podle třídy OSM (dálnice: jeden směrový pás bývá v OSM samostatná linie)
 POLOVICNI_SIRKA_SILNICE = {"motorway": 6.0, "trunk": 6.0, "primary": 4.0, "secondary": 3.5}
+
+
+@dataclass
+class Koeficienty:
+    """Koeficienty nákladové mapy (relativní „cena za metr“, 1 = trať v otevřené krajině)."""
+
+    pen_zastavba_uvnitr: float = 40.0   # uvnitř zástavby obce
+    pen_zastavba_pas: float = 8.0       # pás 300 m kolem zástavby (klesá s odstupem)
+    pen_budovy: float = 10.0            # násobek hustoty budov (samoty, chaty)
+    pen_teren_sklon: float = 1.5        # strmý terén vůči max. sklonu trati
+    pen_teren_relief: float = 2.0       # lokální převýšení v okně 600 m
+    pen_voda: float = 6.0               # vodní plocha
+    pen_reka: float = 1.5               # vodní tok
+    pen_chranena_np: float = 12.0       # NP, NPR
+    pen_chranena_rez: float = 4.0       # rezervace, Natura 2000
+    pen_chranena_chko: float = 0.8      # CHKO a ostatní
+    pen_soubeh_koleje_zbytek: float = 0.3  # zbývající podíl penalizací podél sledovatelné koleje
+
+    # tunel pod městem: kolik „jednotek“ stojí 1 m tunelu navíc oproti povrchové trati (nastaví se z cen)
+    tunel_ekvivalent: float = 0.0       # 0 = automaticky z cen (tunel ÷ trať v úrovni terénu)
+    tunel_min_sirka_mesta_m: float = 800.0  # užší zástavba se neobtunelovává (rampy při sklonu nevyjdou)
 
 
 @dataclass
@@ -220,7 +259,9 @@ class Vlak:
 class Vypocet:
     """Nastavení výpočtu."""
 
-    rozliseni_m: float = 50.0          # velikost buňky rastru (100 = rychle, 25 = detailně)
+    rozliseni_m: float = 20.0          # velikost buňky rastru (100 = rychle, 20 = detailně)
+    max_bunek_mil: float = 80.0        # pojistka: větší rastr se automaticky zhrubí (32 GB RAM ≈ 80 mil. buněk)
+    vlakna: int = 0                    # počet vláken/procesů (0 = všechna dostupná)
     demo: bool = False                 # syntetický terén bez stahování dat
     stahovat_budovy: bool = False      # budovy v celé oblasti (velmi pomalé); jinak jen v pásu kolem trasy
     chranena_uzemi: bool = True        # stahovat chráněná území
@@ -243,6 +284,7 @@ class Project:
     omezeni: Omezeni = field(default_factory=Omezeni)
     soubeh: Soubeh = field(default_factory=Soubeh)
     linky: list[Linka] = field(default_factory=vychozi_linky)
+    koef: Koeficienty = field(default_factory=Koeficienty)
     vypocet: Vypocet = field(default_factory=Vypocet)
 
     # ------------------------------------------------------------------ I/O
@@ -272,6 +314,7 @@ class Project:
             vlak=build(Vlak, vlak_d),
             omezeni=build(Omezeni, d.get("omezeni")),
             soubeh=build(Soubeh, d.get("soubeh")),
+            koef=build(Koeficienty, d.get("koef")),
             linky=[build(Linka, x) for x in d["linky"]] if d.get("linky") else vychozi_linky(),
             vypocet=build(Vypocet, d.get("vypocet")),
         )
@@ -301,9 +344,9 @@ class Project:
                 err.append(f"Bod {i + 1} ({b.nazev}) má neplatné souřadnice.")
             if b.typ not in TYPY_BODU:
                 err.append(f"Bod {i + 1} ({b.nazev}) má neznámý typ '{b.typ}'.")
-        if self.body and not self.body[0].je_stanice:
+        if self.body and self.body[0].typ != TYP_STANICE:
             err.append("První bod musí být stanice.")
-        if self.body and not self.body[-1].je_stanice:
+        if self.body and self.body[-1].typ != TYP_STANICE:
             err.append("Poslední bod musí být stanice.")
         n = self.navrh
         if not 40 <= n.rychlost_kmh <= 400:

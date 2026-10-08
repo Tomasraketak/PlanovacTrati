@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .config import TYP_PRUJEZD, TYP_STANICE, Bod
+from .config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, Bod
 from .geo import to_xy
 
 
@@ -42,8 +42,10 @@ def nejlepsi_pozice(body: list[Bod], lat: float, lon: float, konce_faktor: float
 
 def vychozi_nazev(body: list[Bod], typ: str, obec: str = "") -> str:
     if typ == TYP_STANICE:
-        return obec or f"Stanice {sum(b.je_stanice for b in body) + 1}"
-    n = sum(not b.je_stanice for b in body) + 1
+        return obec or f"Stanice {sum(b.typ == TYP_STANICE for b in body) + 1}"
+    if typ == TYP_ZASTAVKA:
+        return f"Zastávka {obec}" if obec else f"Zastávka {sum(b.je_zastavka for b in body) + 1}"
+    n = sum(b.typ == TYP_PRUJEZD for b in body) + 1
     return f"Průjezdní bod {n}" + (f" (u {obec})" if obec else "")
 
 
@@ -70,10 +72,13 @@ def smaz(body: list[Bod], i: int) -> list[Bod]:
     return [b for k, b in enumerate(body) if k != i]
 
 
-def prepni_typ(body: list[Bod], i: int) -> list[Bod]:
+def prepni_typ(body: list[Bod], i: int, novy: str | None = None) -> list[Bod]:
+    """Přepne typ bodu (stanice → zastávka → průjezdní bod → stanice), nebo nastaví ``novy``."""
+    poradi = [TYP_STANICE, TYP_ZASTAVKA, TYP_PRUJEZD]
     out = list(body)
     b = out[i]
-    out[i] = Bod(b.nazev, b.lat, b.lon, TYP_PRUJEZD if b.je_stanice else TYP_STANICE)
+    typ = novy or poradi[(poradi.index(b.typ) + 1) % len(poradi)]
+    out[i] = Bod(b.nazev, b.lat, b.lon, typ)
     return out
 
 
