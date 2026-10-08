@@ -118,6 +118,9 @@ def souhrn_text(r: Result) -> str:
     if r.porovnani_vlaku and not r.matice:
         lines.append("Jízdní doby podle vlaku (všechny zastávky / bez zastavení):")
         lines += [f"  • {c.vlak}: {fmt_cas(c.celkem_s)} / {fmt_cas(c.express_s)}" for c in r.porovnani_vlaku]
+    zd = getattr(r.osm, "zdroje", {})
+    if zd:
+        lines.append("Zdroje dat: " + "; ".join(f"{k} – {v}" for k, v in zd.items()))
     if r.varovani:
         lines.append("Varování:")
         lines += [f"  • {w}" for w in r.varovani]

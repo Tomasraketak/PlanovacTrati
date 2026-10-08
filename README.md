@@ -30,66 +30,46 @@ vloží oblouky, navrhne niveletu a spočítá:
 
 ---
 
-## ⚡ Instalace a spuštění – Windows
+## ⚡ Instalace, aktualizace a spuštění jedním příkazem
 
-**Potřebujete:** [Python 3.10 nebo novější](https://www.python.org/downloads/) – při instalaci zaškrtněte
-**„Add python.exe to PATH“**. Volitelně [Git](https://git-scm.com/download/win) (pro snadné aktualizace).
+Otevřete **nový terminál**, vložte jediný příkaz a stiskněte Enter. Příkaz sám (jen to, co chybí) doinstaluje
+Python a Git, stáhne program, nainstaluje knihovny, **při každém spuštění stáhne novou verzi** a otevře aplikaci
+v prohlížeči (<http://localhost:8501>). Celý program se pak ovládá z okna prohlížeče.
 
-### 1. Stažení
-
-S Gitem (doporučeno) – v příkazovém řádku (`Win + R` → `cmd`):
-
-```bat
-cd %USERPROFILE%\Documents
-git clone https://github.com/tomasraketak/planovactrati.git
-cd planovactrati
-```
-
-Bez Gitu: na GitHubu klikněte na **Code → Download ZIP**, rozbalte a otevřete složku.
-
-### 2. Instalace (jednou)
+### 🪟 Windows (PowerShell nebo cmd)
 
 ```bat
-install.bat
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1 | iex"
 ```
-(nebo dvojklik na `install.bat`) – vytvoří virtuální prostředí `.venv` a nainstaluje knihovny (několik minut).
 
-### 3. Spuštění
-
-```bat
-run.bat
-```
-(nebo dvojklik) – v prohlížeči se otevře aplikace na adrese <http://localhost:8501>. Ukončení: zavřít okno
-příkazového řádku nebo `Ctrl + C`.
-
-### 4. Aktualizace na novou verzi
-
-```bat
-update.bat
-```
-(stáhne novou verzi přes `git pull` a aktualizuje knihovny).
-
-<details>
-<summary>Ruční instalace bez .bat skriptů (cmd)</summary>
-
-```bat
-py -3 -m venv .venv
-.venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-streamlit run app.py
-```
-</details>
-
-## 🐧 Linux / 🍎 macOS
+### 🐧 Linux / 🍎 macOS
 
 ```bash
-git clone https://github.com/tomasraketak/planovactrati.git
-cd planovactrati
-./install.sh      # instalace
-./run.sh          # spuštění GUI
-./update.sh       # aktualizace
+curl -fsSL https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.sh | bash
 ```
+
+- Program se uloží do `%USERPROFILE%\PlanovacTrati` (Windows) / `~/PlanovacTrati`; ten samý příkaz ho příště
+  **aktualizuje a spustí** (knihovny se přeinstalují jen tehdy, když se změnily – další starty jsou rychlé).
+- **Spuštění bez aktualizace:** před příkaz nastavte `PLANOVAC_BEZ_AKTUALIZACE=1`
+  (Windows: `set PLANOVAC_BEZ_AKTUALIZACE=1 &&` před `powershell …`; Linux/macOS: `PLANOVAC_BEZ_AKTUALIZACE=1 curl … | bash`),
+  nebo dvojklik na `run.bat` / `./run.sh` ve složce programu.
+- **Ovládání z GUI:** v levém panelu **⚙️ Aplikace** – kontrola a instalace aktualizací, restart, ukončení,
+  smazání stažených dat, otevření složky výstupů. Po aktualizaci se aplikace sama restartuje.
+- Co je potřeba: Windows 10/11 s `winget` (Python 3.12 a Git se doinstalují samy; bez nich se použije ZIP),
+  Linux/macOS: Python 3.10+ a git (`sudo apt install python3 python3-venv git` / `brew install python git`).
+- Ve složce programu jsou i `install.bat`, `run.bat`, `update.bat` (Linux/macOS `*.sh`) – jen volají `start.ps1` / `start.sh`.
+
+<details>
+<summary>Ruční instalace (bez skriptů)</summary>
+
+```bat
+git clone https://github.com/Tomasraketak/PlanovacTrati.git
+cd PlanovacTrati
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m streamlit run app.py
+```
+</details>
 
 ---
 
@@ -161,7 +141,7 @@ vahy: {obce: 1.0, budovy: 1.0, teren: 1.0, voda: 1.0, chranena_uzemi: 1.0, delka
 
 ## 🔬 Jak to funguje
 
-1. **Data** – výškový model Copernicus GLO-30 (AWS Open Data) a OpenStreetMap (Overpass API): zástavba, budovy,
+1. **Data** – výškový model Copernicus GLO-30 (AWS Open Data) a OpenStreetMap (Overpass API; při jeho výpadku záložně Overture Maps): zástavba, budovy,
    vody, silnice, železnice, chráněná území. Vše se ukládá do `data/cache/`.
 2. **Nákladová mapa** – každé buňce rastru se přiřadí „cena za metr trati“ podle zástavby, budov, členitosti terénu,
    vody a ochrany přírody (s vahami z GUI). Okolí stanic se nepenalizuje.
@@ -197,7 +177,7 @@ planovac/              výpočetní jádro
 projekty/              uložené projekty (YAML)
 docs/                  dokumentace
 tests/                 automatické testy (pytest)
-install/run/update.bat|.sh, planovac.bat|.sh
+start.ps1 / start.sh (jednopříkazová instalace), install/run/update.bat|.sh, planovac.bat|.sh
 ```
 
 ## 🧪 Testy (pro vývojáře)
@@ -213,8 +193,8 @@ Testy běží bez internetu na syntetickém terénu.
 | Problém | Řešení |
 |---|---|
 | Výpočet na 20 m je pomalý / dochází paměť | Snižte rozlišení (50 m), nebo zmenšete *max. prodloužení*; 20 m potřebuje ~6 GB RAM, 10 m přes 25 GB. Počet vláken lze omezit v *Výpočet a data*. |
-| `Python nebyl nalezen` | Nainstalujte Python z python.org a zaškrtněte *Add python.exe to PATH*, pak znovu `install.bat`. |
-| Varování *Overpass API nedostupné* | Servery OSM bývají přetížené. Výpočet doběhne bez dané vrstvy; zopakujte ho později (úspěšně stažená data zůstávají v cache). |
+| `Python nebyl nalezen` | Nainstalujte Python z python.org a zaškrtněte *Add python.exe to PATH*, pak znovu vložte instalační příkaz. |
+| Varování *Overpass API nedostupné* | Servery OSM bývají přetížené. V režimu *Zdroj dat = Automaticky* se data samy doplní z **Overture Maps**; pokud ani ten nejde, výpočet doběhne bez dané vrstvy – zopakujte ho později (stažená data zůstávají v cache). |
 | Výpočet je pomalý | Zvolte rozlišení 100 m, vypněte *Stahovat budovy v celé oblasti*, nebo zmenšete *max. prodloužení* (menší oblast). |
 | Málo paměti | Velké oblasti (stovky km) počítejte na 100 m. |
 | Chci přesnější terén | Stáhněte DMR 5G (ČÚZK) jako GeoTIFF a zadejte cestu v *Výpočet a data → Vlastní DEM*. |

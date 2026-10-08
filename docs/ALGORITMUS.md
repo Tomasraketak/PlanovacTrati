@@ -17,7 +17,7 @@ takže se mimo elipsy vůbec nehledá. Oblast = obálka elips + okraj.
 ## 2. Data
 - **Výškový model**: Copernicus DEM GLO-30 (dlaždice 1°×1°, ~30 m), převzorkovaný na zvolené rozlišení
   (výchozí 50 m). Alternativně vlastní GeoTIFF (např. DMR 5G ČÚZK).
-- **OpenStreetMap** (Overpass API): zástavba (landuse), obce, vodní plochy a řeky, silnice I./II. třídy, dálnice,
+- **OpenStreetMap** (Overpass API; záložně **Overture Maps** přes `planovac/zdroje.py`, čtení parquet po řádkových skupinách): zástavba (landuse), obce, vodní plochy a řeky, silnice I./II. třídy, dálnice,
   železnice, chráněná území a středy budov.
 
 ## 3. Nákladová mapa (`costsurface.py`)

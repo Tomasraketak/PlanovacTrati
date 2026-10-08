@@ -29,6 +29,7 @@ from shapely.ops import linemerge, polygonize, unary_union
 
 from .dem import USER_AGENT
 from .geo import to_lonlat, to_xy
+from . import zdroje
 from .paths import cache_dir
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,14 @@ OVERPASS_ENDPOINTS = [
 ]
 
 Progress = Callable[[str], None]
+
+# Zdroj dat: "auto" = Overpass a při selhání Overture Maps, "overpass" = jen Overpass, "overture" = jen Overture.
+ZDROJE_REZIM = "auto"
+
+
+def nastav_zdroj(rezim: str) -> None:
+    global ZDROJE_REZIM
+    ZDROJE_REZIM = rezim if rezim in ("auto", "overpass", "overture") else "auto"
 
 
 class OverpassError(RuntimeError):
@@ -60,6 +69,7 @@ class OsmData:
     chranena: list[tuple[str, int, Polygon]] = field(default_factory=list)   # (název, stupeň 1–3, polygon)
     budovy: np.ndarray = field(default_factory=lambda: np.zeros((0, 2)))
     budovy_kompletni: bool = False          # True = budovy staženy pro celou oblast
+    zdroje: dict[str, str] = field(default_factory=dict)   # vrstva → odkud data pocházejí
     varovani: list[str] = field(default_factory=list)
 
 
@@ -213,6 +223,74 @@ def _csv_points(txt: str) -> np.ndarray:
     return np.column_stack([x, y])
 
 
+
+# ------------------------------------------------------------- záložní zdroj (Overture Maps)
+
+def _xy_geom(g):
+    import shapely
+    return shapely.transform(g, lambda c: np.column_stack(to_xy(c[:, 0], c[:, 1])))
+
+
+def _nazev(r: dict) -> str:
+    n = r.get("names") or {}
+    return (n.get("primary") if isinstance(n, dict) else "") or ""
+
+
+def _polys(g):
+    return [p for p in getattr(g, "geoms", [g]) if p.geom_type == "Polygon" and not p.is_empty]
+
+
+def _ov_zastavba(osm: OsmData, bbox, progress):
+    cil = {"residential", "industrial", "commercial", "retail", "garages", "farmyard", "developed"}
+    for r, g in zdroje.geometrie("base", "land_use", bbox, ["class", "subtype"], progress):
+        if (r.get("class") in cil) or (r.get("subtype") == "developed" and r.get("class") in (None, "")):
+            osm.zastavba += [p for p in map(_xy_geom, _polys(g))]
+
+
+def _ov_obce(osm: OsmData, bbox, progress):
+    for r, g in zdroje.geometrie("divisions", "division", bbox, ["class", "subtype", "names"], progress):
+        if g.geom_type == "Point" and r.get("class") in ("city", "town", "village", "hamlet"):
+            x, y = to_xy(g.x, g.y)
+            osm.obce.append((_nazev(r), r["class"], Point(x, y)))
+
+
+def _ov_voda(osm: OsmData, bbox, progress):
+    for r, g in zdroje.geometrie("base", "water", bbox, ["class", "subtype", "names"], progress):
+        if g.geom_type in ("LineString", "MultiLineString"):
+            for ls in getattr(g, "geoms", [g]):
+                osm.reky.append((_nazev(r), _xy_geom(ls)))
+        else:
+            osm.voda_plochy += [p for p in map(_xy_geom, _polys(g)) if p.area > 2000]
+
+
+def _ov_doprava(osm: OsmData, bbox, progress):
+    for r, g in zdroje.geometrie("transportation", "segment", bbox, ["class", "subtype", "names"], progress):
+        for ls in getattr(g, "geoms", [g]):
+            if ls.geom_type != "LineString":
+                continue
+            if r.get("subtype") == "rail":
+                if r.get("class") in ("standard_gauge", "rail", None, ""):
+                    osm.zeleznice.append(_xy_geom(ls))
+            elif r.get("subtype") == "road" and r.get("class") in ("motorway", "trunk", "primary", "secondary"):
+                osm.silnice.append((r["class"], _nazev(r), _xy_geom(ls)))
+
+
+def _ov_budovy(bbox, progress) -> np.ndarray:
+    ll = zdroje.budovy_stredy(bbox, progress)
+    if len(ll) == 0:
+        return np.zeros((0, 2))
+    x, y = to_xy(ll[:, 0], ll[:, 1])
+    return np.column_stack([x, y])
+
+
+def zalozni_povolen() -> bool:
+    return ZDROJE_REZIM in ("auto", "overture")
+
+
+def overpass_povolen() -> bool:
+    return ZDROJE_REZIM in ("auto", "overpass")
+
+
 # -------------------------------------------------------------------- dotazy
 
 def _q(body: str, timeout: int = 180) -> str:
@@ -231,12 +309,29 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
     b = _bbox_str(bbox)
     osm = OsmData()
 
-    def safe(label, fn):
-        try:
-            fn()
-        except OverpassError as e:
-            osm.varovani.append(f"{e}. Vrstva '{label}' nebyla použita – zkuste výpočet později zopakovat.")
-            log.warning("%s", e)
+    def safe(label, fn, zalozni=None):
+        """Overpass; při selhání (nebo v režimu „jen Overture“) záložní zdroj Overture Maps."""
+        chyba = None
+        if overpass_povolen():
+            try:
+                fn()
+                osm.zdroje[label] = "OSM (Overpass)"
+                return
+            except OverpassError as e:
+                chyba = e
+        if zalozni is not None and zalozni_povolen():
+            try:
+                zalozni(osm, bbox, progress)
+                osm.zdroje[label] = "Overture Maps"
+                if chyba:
+                    osm.varovani.append(f"Vrstva '{label}': Overpass nedostupný, použit záložní zdroj Overture Maps.")
+                return
+            except Exception as e2:        # noqa: BLE001 – chybu zdroje vždy převést na varování
+                chyba = chyba or e2
+                log.warning("Overture %s: %s", label, e2)
+        if chyba is not None:
+            osm.varovani.append(f"{chyba}. Vrstva '{label}' nebyla použita – zkuste výpočet později zopakovat.")
+            log.warning("%s", chyba)
 
     def zastavba():
         data = overpass(_q(
@@ -291,10 +386,10 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
         for tags, p in _polygons(data):
             osm.chranena.append((tags.get("name", "chráněné území"), _protect_level(tags), p))
 
-    safe("zástavba", zastavba)
-    safe("obce", obce)
-    safe("vodstvo", voda)
-    safe("doprava", doprava)
+    safe("zástavba", zastavba, _ov_zastavba)
+    safe("obce", obce, _ov_obce)
+    safe("vodstvo", voda, _ov_voda)
+    safe("doprava", doprava, _ov_doprava)
     if chranena:
         safe("chráněná území", chranena_uzemi)
     if budovy:
@@ -304,6 +399,21 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
         except OverpassError as e:
             osm.varovani.append(f"{e}. Budovy v oblasti nebyly staženy (použije se jen zástavba).")
     return osm
+
+
+def _budovy_dlazdice(q: str, tb, progress, label: str) -> np.ndarray:
+    chyba = None
+    if overpass_povolen():
+        try:
+            return _csv_points(overpass(q, fmt="csv", progress=progress, label=label))
+        except OverpassError as e:
+            chyba = e
+    if zalozni_povolen():
+        try:
+            return _ov_budovy(tb, progress)
+        except Exception as e2:            # noqa: BLE001
+            chyba = chyba or e2
+    raise OverpassError(str(chyba))
 
 
 def fetch_buildings_bbox(bbox, progress: Progress | None = None, tile_deg: float = 0.3) -> np.ndarray:
@@ -319,8 +429,7 @@ def fetch_buildings_bbox(bbox, progress: Progress | None = None, tile_deg: float
             i += 1
             tb = (round(lo, 4), round(la, 4), round(lo + tile_deg, 4), round(la + tile_deg, 4))
             q = f'[out:csv(::lat,::lon;false)][timeout:180];way["building"]{_bbox_str(tb)};out center qt;'
-            txt = overpass(q, fmt="csv", progress=progress, label=f"budovy {i}/{n}")
-            parts.append(_csv_points(txt))
+            parts.append(_budovy_dlazdice(q, tb, progress, f"budovy {i}/{n}"))
     pts = np.vstack(parts) if parts else np.zeros((0, 2))
     return pts
 
@@ -328,7 +437,9 @@ def fetch_buildings_bbox(bbox, progress: Progress | None = None, tile_deg: float
 def _fetch_poly(poly_lonlat, progress, label="budovy v koridoru") -> np.ndarray:
     coords = " ".join(f"{lat:.5f} {lon:.5f}" for lon, lat in poly_lonlat)
     q = f'[out:csv(::lat,::lon;false)][timeout:180];way["building"](poly:"{coords}");out center qt;'
-    return _csv_points(overpass(q, fmt="csv", progress=progress, label=label))
+    lo = [p[0] for p in poly_lonlat]
+    la = [p[1] for p in poly_lonlat]
+    return _budovy_dlazdice(q, (min(lo), min(la), max(lo), max(la)), progress, label)
 
 
 def fetch_buildings_corridor(poly_lonlat: list[tuple[float, float]], progress: Progress | None = None) -> np.ndarray:

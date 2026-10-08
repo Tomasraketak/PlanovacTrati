@@ -17,7 +17,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
-from planovac import __version__
+from planovac import __version__, aktualizace
 from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
@@ -235,12 +235,55 @@ with st.sidebar:
         w(vy, "stahovat_budovy", "Stahovat budovy v celé oblasti (velmi pomalé)", "check",
           help="Vypnuto: budovy se stáhnou v pásu 1,2 km kolem první varianty trasy a návrh se zopakuje – "
                "rychlejší a obvykle stejně dobré.")
+        w(vy, "zdroj_dat", "Zdroj dat", "select", options=["auto", "overpass", "overture"],
+          format_func={"auto": "Automaticky (Overpass → Overture Maps)", "overpass": "Jen Overpass (OSM)",
+                       "overture": "Jen Overture Maps"}.get,
+          help="Overpass bývá přetížený – v automatickém režimu se při jeho výpadku data načtou z Overture Maps "
+               "(budovy, silnice, železnice, voda, zástavba, sídla). Chráněná území má jen Overpass.")
         w(vy, "chranena_uzemi", "Stahovat chráněná území", "check")
         w(vy, "okraj_km", "Okraj oblasti [km]", min_value=0.0, max_value=30.0, step=1.0)
         w(vy, "tolerance_zjednoduseni_m", "Tolerance zjednodušení osy [m]", min_value=20.0, max_value=1000.0, step=10.0)
         w(vy, "vlastni_dem", "Vlastní DEM (cesta ke GeoTIFF, nepovinné)", "text")
 
     st.caption(odhad_rastru(P))
+
+    with st.expander("⚙️ Aplikace"):
+        gv = aktualizace.verze_gitu()
+        st.caption(f"Verze {__version__}" + (f" ({gv})" if gv else ""))
+        if st.button("🔍 Zkontrolovat aktualizace", width="stretch"):
+            with st.spinner("Kontaktuji GitHub …"):
+                st.session_state.akt_stav = aktualizace.zkontroluj()
+        stav = st.session_state.get("akt_stav")
+        if stav:
+            n, popis = stav
+            (st.success if n == 0 else st.info if n else st.warning)(popis)
+            if n:
+                if st.button("⬇️ Aktualizovat a restartovat", type="primary", width="stretch"):
+                    with st.spinner("Stahuji novou verzi a knihovny …"):
+                        ok, protokol = aktualizace.aktualizuj()
+                    if ok:
+                        st.session_state.pop("akt_stav", None)
+                        st.success("Hotovo – restartuji aplikaci, stránka se za chvíli obnoví.")
+                        time.sleep(1.5)
+                        aktualizace.restartuj()
+                    else:
+                        st.error(protokol)
+        c1, c2 = st.columns(2)
+        if c1.button("🔄 Restartovat", width="stretch", help="Znovu načte program (např. po ruční změně souborů)."):
+            st.info("Restartuji …")
+            time.sleep(1)
+            aktualizace.restartuj()
+        if c2.button("⏻ Ukončit", width="stretch", help="Zastaví program; okno prohlížeče pak můžete zavřít."):
+            st.warning("Program byl ukončen, toto okno můžete zavřít.")
+            time.sleep(1)
+            aktualizace.ukonci()
+        mb = aktualizace.velikost_cache_mb()
+        if st.button(f"🗑️ Smazat stažená data ({mb:.0f} MB)", width="stretch",
+                     help="Smaže cache OSM/Overture/DEM; příští výpočet je stáhne znovu."):
+            st.success(f"Uvolněno {aktualizace.smaz_cache():.0f} MB.")
+        if st.button("📂 Otevřít složku výstupů", width="stretch", help="Funguje při lokálním běhu."):
+            if not aktualizace.otevri_slozku(OUTPUT_DIR):
+                st.info(f"Složka výstupů: {OUTPUT_DIR}")
     st.markdown('<p class="small-note">Data: Copernicus DEM GLO-30, © OpenStreetMap. '
                 'Výsledky jsou orientační studie.</p>', unsafe_allow_html=True)
 
@@ -267,7 +310,8 @@ def koeficienty_tab():
                               "pod městem i úseky se sníženou rychlostí. Do rozpočtu se nezapočítává.")
             w(v, "tunel_pod_mestem", "Zvažovat tunel pod městem místo obchvatu", "check")
             w(v, "penalizace_demolice_mil", "Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
-              step=5.0)
+              step=5.0, help="Přičte se k ceně výkupu jen při hledání trasy (do rozpočtu se nezapočítá). "
+                             "Násobí se posuvníkem „Nebourat domy“.")
             w(c, "zastavba_prirazka_mil_km", "Příplatek za vedení po povrchu zástavbou [mil. Kč/km]", min_value=0.0,
               step=100.0)
             w(c, "rychlost_razeni_km_rok", "Postup ražby na jeden čelbu [km/rok]", min_value=0.1, max_value=3.0,
@@ -316,9 +360,6 @@ def koeficienty_tab():
         w(v, "voda", "🌊 Vyhýbat se vodním plochám", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
         w(v, "chranena_uzemi", "🌲 Šetřit chráněná území", "slider", min_value=0.0, max_value=5.0, step=0.25, format="%.2f")
         w(v, "delka", "📏 Co nejkratší trasa", "slider", min_value=0.1, max_value=5.0, step=0.1, format="%.1f")
-        w(v, "penalizace_demolice_mil", "🏚️ Penalizace zbourání domu [mil. Kč/dům]", min_value=0.0, max_value=500.0,
-          step=5.0, help="Přičte se k ceně výkupu jen při hledání trasy (do rozpočtu se nezapočítá). "
-                         "Násobí se posuvníkem „Nebourat domy“.")
 
     with st.expander("💰 Jednotkové ceny"):
         c = P.ceny

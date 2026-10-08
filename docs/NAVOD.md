@@ -1,5 +1,9 @@
 # 📖 Návod k použití
 
+## Instalace, aktualizace, spuštění
+Celé je to jeden příkaz z README (`start.ps1` / `start.sh`). V aplikaci pak levý panel **⚙️ Aplikace** umí zkontrolovat
+a nainstalovat aktualizace, restartovat či ukončit program a smazat stažená data.
+
 ## Rychlý start (3 kroky)
 
 1. **Naklikejte body trasy** na kartě *🗺️ Trasa a zastávky* – nad mapou zvolte režim **🚉 Stanice** nebo
@@ -131,7 +135,11 @@ Najetím myší na úsek trati se zobrazí jeho typ, staničení a délka. Vlevo
 - Hodně tunelů? Zvyšte max. sklon nebo povolené prodloužení, případně váhu *Šetřit tunely*.
 - Trasa prochází vesnicí? Zvyšte váhu *Vyhýbat se obcím* (a zkontrolujte, že tam není zbytečně stanice).
 - Porovnání variant: uložte projekt pod různými jmény a porovnejte HTML reporty.
-- Overpass API (OSM) je občas přetížené – program to zkouší opakovaně a na více serverech. Když se vrstvu
+- **Zdroje dat:** Overpass API (OSM) je občas přetížené – program to zkouší opakovaně na více serverech a pak
+  (volba *Výpočet a data → Zdroj dat = Automaticky*) použije **Overture Maps** (budovy, silnice, železnice, voda,
+  zástavba, sídla; čte se po částech z parquet souborů na S3, první použití vrstvy vytváří index a trvá déle,
+  výsledky se ukládají do `data/cache`). Chráněná území má jen OSM. Zdroj každé vrstvy je v souhrnu výsledku.
+  Režimy *Jen Overpass* / *Jen Overture* jsou pro porovnání. Když se vrstvu
   nepodaří stáhnout, zobrazí varování; stačí výpočet za chvíli zopakovat (stažená data zůstávají v cache).
 
 ## Příkazová řádka

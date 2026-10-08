@@ -12,3 +12,4 @@ streamlit>=1.50
 streamlit-folium>=0.22
 folium>=0.17
 plotly>=5.20
+pyarrow>=14

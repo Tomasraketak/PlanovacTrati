@@ -137,6 +137,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         osm = synthetic.synthetic_osm(grid, stanice_xy)
     else:
         z = dem.load_dem(grid, vyp.vlastni_dem, lambda m: prog(0.08, m))
+        osm_mod.nastav_zdroj(vyp.zdroj_dat)
         prog(0.15, "Stahuji data OpenStreetMap …")
         osm = osm_mod.fetch_area(grid.bbox_lonlat(0.005), budovy=vyp.stahovat_budovy,
                                  chranena=vyp.chranena_uzemi, progress=lambda m: prog(0.2, m))

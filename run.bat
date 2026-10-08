@@ -1,11 +1,6 @@
 @echo off
-REM ===== Planovac trati - spusteni GUI (Windows) =====
+REM Spusteni bez aktualizace (vola start.ps1)
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
-    echo Aplikace neni nainstalovana. Nejprve spustte install.bat
-    pause
-    exit /b 1
-)
-echo Spoustim Planovac trati ... (okno prohlizece se otevre samo, ukonceni: Ctrl+C)
-".venv\Scripts\python.exe" -m streamlit run app.py --browser.gatherUsageStats false
+set PLANOVAC_BEZ_AKTUALIZACE=1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
 pause

@@ -265,6 +265,7 @@ class Vypocet:
     demo: bool = False                 # syntetický terén bez stahování dat
     stahovat_budovy: bool = False      # budovy v celé oblasti (velmi pomalé); jinak jen v pásu kolem trasy
     chranena_uzemi: bool = True        # stahovat chráněná území
+    zdroj_dat: str = "auto"            # auto = Overpass → Overture Maps; overpass; overture
     vlastni_dem: str = ""              # cesta k vlastnímu GeoTIFF (např. DMR 5G), jinak Copernicus
     okraj_km: float = 5.0              # okraj oblasti kolem elipsy přípustných tras
     tolerance_zjednoduseni_m: float = 150.0  # tolerance Douglas–Peucker pro vrcholy oblouků
