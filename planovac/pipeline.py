@@ -44,6 +44,8 @@ class Result:
     trvani_s: float = 0.0
     omezeni: list[omezeni.Usek] = field(default_factory=list)     # úseky se sníženou rychlostí
     omezeni_protokol: list[str] = field(default_factory=list)
+    auto: list = field(default_factory=list)            # jízdy autem mezi stanicemi (auto.JizdaAutem)
+    auto_varovani: list[str] = field(default_factory=list)
     zaklad_cena_mil: float = 0.0          # cena varianty bez úseků se sníženou rychlostí
     zaklad_demolice: int = 0
     porovnani_vlaku: list[traction.PorovnaniVlaku] = field(default_factory=list)
@@ -144,6 +146,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         varovani += osm.varovani
 
     Rmin, Rpref = nav.min_polomer(), nav.doporuceny_polomer()
+    rmin_useky = [nav.min_polomer_pro(b.max_rychlost_kmh) if b.max_rychlost_kmh else Rmin for b in body[:-1]]
     tol = max(vyp.tolerance_zjednoduseni_m, 2 * res)
     n_seg = len(body_xy) - 1
     n_vl = paralelne.pocet_vlaken(vyp.vlakna)
@@ -197,7 +200,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
 
     def fit(kor, zony=None, ref_xy=None):
         return horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in kor], Rmin, Rpref, Lp=delky_nast,
-                                        tol=tol, ds=10.0, zony=zony, ref_xy=ref_xy)
+                                        tol=tol, ds=10.0, zony=zony, ref_xy=ref_xy, rmin_useky=rmin_useky)
 
     def stavba_cs(s_tunelem: bool):
         """(základní, tunel pod městem | None) – náročné vrstvy se počítají jednou."""
@@ -277,7 +280,8 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             n_mezi = sum(1 for b in body[1:-1] if b.typ == TYP_STANICE)
             rozp = costs.estimate(o.delka, s, h, an, n_mezi, 2, project.ceny, sleva_mil=sleva, n_zastavek=n_zast,
                                   podzemni_mil=podz)
-            jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak)
+            jizda = traction.compute(s, z_rail, o.krivost, o.body_s, nazvy, je_stanice, nav, project.vlak, None,
+                                     traction.limity_useku(body, o.body_s))
             nd = len(an.demolice_idx)
             cena_m = vertical.best_cost(h, nav, project.ceny, voda, bud, demol_mil, zast_os, st_vz) * f_soub
             J = (rozp.celkem_mil + project.vahy.penalizace_demolice_mil * project.vahy.budovy * nd
@@ -318,10 +322,11 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     useky_soubehu, sleva_soubehu = var.data["soubeh"], var.data["sleva"]
 
     prog(0.94, "Porovnávám jízdní doby vlaků …")
+    lim = traction.limity_useku(body, osa.body_s)
     porovnani = traction.porovnani_vlaku(osa.s, z_rail, osa.krivost, osa.body_s, nazvy, je_stanice, nav,
-                                         project.vlak)
+                                         project.vlak, lim)
     matice = traction.matice_jizdnich_dob(osa.s, z_rail, osa.krivost, osa.body_s, nazvy, je_stanice, nav,
-                                          project.vlak, project.linky)
+                                          project.vlak, project.linky, lim)
 
     vz_useky = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(body_xy[:-1], body_xy[1:])]
     vz = max(sum(vz_useky), 1.0)
@@ -356,11 +361,13 @@ def jizda_pro(r: Result, vlak_nazev: str, linka) -> traction.JizdniDoby:
     if isinstance(linka, str):
         linka = next((li for li in p.linky if li.nazev == linka), None)
     return traction.compute(r.osa.s, r.z_kolej, r.osa.krivost, r.osa.body_s, [b.nazev for b in p.body],
-                            [b.je_stanice for b in p.body], p.navrh, v, linka)
+                            [b.je_stanice for b in p.body], p.navrh, v, linka,
+                            traction.limity_useku(p.body, r.osa.body_s))
 
 
 def matice_pro(r: Result, linky) -> list[traction.BunkaMatice]:
     """Matice vlak × linka pro výsledek a (případně upravené) linky."""
     p = r.project
     return traction.matice_jizdnich_dob(r.osa.s, r.z_kolej, r.osa.krivost, r.osa.body_s, [b.nazev for b in p.body],
-                                        [b.je_stanice for b in p.body], p.navrh, p.vlak, linky)
+                                        [b.je_stanice for b in p.body], p.navrh, p.vlak, linky,
+                                        traction.limity_useku(p.body, r.osa.body_s))

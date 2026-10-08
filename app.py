@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import io
+import os
 import time
 import zipfile
 from pathlib import Path
@@ -430,11 +431,23 @@ if spustit:
         with st.status("Navrhuji trať …", expanded=True) as status:
             last = {"msg": ""}
 
+            import threading
+
+            from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+
+            ctx = get_script_run_ctx()
+
             def cb(frac, msg):
-                bar.progress(min(max(frac, 0.0), 1.0), text=msg)
-                if msg != last["msg"]:
-                    status.write(msg)
-                    last["msg"] = msg
+                # výpočet volá průběh i z pracovních vláken – ty musí dostat kontext relace Streamlitu
+                if threading.current_thread() is not threading.main_thread() and ctx is not None:
+                    add_script_run_ctx(threading.current_thread(), ctx)
+                try:
+                    bar.progress(min(max(frac, 0.0), 1.0), text=msg)
+                    if msg != last["msg"]:
+                        status.write(msg)
+                        last["msg"] = msg
+                except Exception:                  # průběh je jen kosmetický – nesmí shodit výpočet
+                    pass
 
             try:
                 t0 = time.time()
@@ -442,6 +455,9 @@ if spustit:
                 st.session_state.vysledek = res
                 status.update(label=f"Hotovo za {time.time() - t0:.0f} s ✅", state="complete", expanded=False)
             except Exception as e:  # zobrazit uživateli
+                import traceback
+
+                traceback.print_exc()          # do konzole/logu (v GUI je výjimka jen sbalená ve stavu)
                 status.update(label="Výpočet selhal ❌", state="error")
                 st.exception(e)
         bar.empty()
@@ -563,7 +579,7 @@ with tabs[0]:
             if ss.presun and ss.vybrany is not None:
                 nove = list(P.body)
                 b = nove[ss.vybrany]
-                nove[ss.vybrany] = Bod(b.nazev, round(lat, 5), round(lon, 5), b.typ)
+                nove[ss.vybrany] = Bod(b.nazev, round(lat, 5), round(lon, 5), b.typ, b.max_rychlost_kmh)
                 ss.presun = False
                 zmen_body(nove, ss.vybrany)
             elif not ss.rezim.startswith("✋"):
@@ -585,7 +601,16 @@ with tabs[0]:
                             f"{b.lat:.5f}, {b.lon:.5f} · {b.typ}")
                 novy_nazev = st.text_input("Název", b.nazev, key=f"vyb_nazev_{ss.body_ver}")
                 if novy_nazev != b.nazev:
-                    P.body[i] = Bod(novy_nazev, b.lat, b.lon, b.typ)
+                    P.body[i] = Bod(novy_nazev, b.lat, b.lon, b.typ, b.max_rychlost_kmh)
+                if i < len(P.body) - 1:
+                    lv = st.number_input("Max. rychlost k dalšímu bodu [km/h] (0 = globální)", min_value=0,
+                                         max_value=int(P.navrh.rychlost_kmh), step=5,
+                                         value=int(b.max_rychlost_kmh or 0), key=f"vyb_lim_{i}_{ss.body_ver}",
+                                         help="Limit platí v úseku od tohoto bodu k následujícímu; "
+                                              "v něm se zmenší i nejmenší povolený poloměr oblouků.")
+                    nv = float(lv) if lv >= 40 else None
+                    if nv != b.max_rychlost_kmh:
+                        P.body[i] = Bod(P.body[i].nazev, b.lat, b.lon, b.typ, nv)
                 c = st.columns(3)
                 if c[0].button("🔁 Změnit typ", width="stretch", help="stanice → zastávka → průjezdní bod"):
                     zmen_body(body_mod.prepni_typ(P.body, i), i)
@@ -630,23 +655,30 @@ with tabs[0]:
                         zmen_body(nove, i)
 
         st.markdown("**Body trasy** (v pořadí jízdy; lze přímo editovat, mazat i přidávat řádky)")
-        df = pd.DataFrame([{"Název": b.nazev, "Typ": b.typ, "Šířka (lat)": b.lat, "Délka (lon)": b.lon}
-                           for b in P.body])
+        LIM = "Max. rychlost k dalšímu bodu [km/h]"
+        df = pd.DataFrame([{"Název": b.nazev, "Typ": b.typ, "Šířka (lat)": b.lat, "Délka (lon)": b.lon,
+                            LIM: b.max_rychlost_kmh} for b in P.body])
         if df.empty:
-            df = pd.DataFrame(columns=["Název", "Typ", "Šířka (lat)", "Délka (lon)"])
+            df = pd.DataFrame(columns=["Název", "Typ", "Šířka (lat)", "Délka (lon)", LIM])
+        df[LIM] = pd.to_numeric(df[LIM], errors="coerce")
         ed = st.data_editor(
             df, num_rows="dynamic", hide_index=False, width="stretch", key=f"body_editor_{st.session_state.body_ver}",
             column_config={
                 "Typ": st.column_config.SelectboxColumn(options=list(TYPY_BODU), default=TYP_STANICE, required=True),
                 "Šířka (lat)": st.column_config.NumberColumn(format="%.5f", min_value=-90, max_value=90),
                 "Délka (lon)": st.column_config.NumberColumn(format="%.5f", min_value=-180, max_value=180),
+                LIM: st.column_config.NumberColumn(
+                    format="%d", min_value=40, max_value=int(P.navrh.rychlost_kmh), step=5,
+                    help="Ruční limit rychlosti úseku od tohoto bodu k dalšímu (prázdné = globální návrhová rychlost "
+                         f"{P.navrh.rychlost_kmh:.0f} km/h). V úseku se zmenší i nejmenší povolený poloměr oblouku."),
             })
         nove = []
         for _, row in ed.iterrows():
             if pd.isna(row["Šířka (lat)"]) or pd.isna(row["Délka (lon)"]):
                 continue
             nove.append(Bod(str(row["Název"] or "Bod"), float(row["Šířka (lat)"]), float(row["Délka (lon)"]),
-                            row["Typ"] if row["Typ"] in TYPY_BODU else TYP_STANICE))
+                            row["Typ"] if row["Typ"] in TYPY_BODU else TYP_STANICE,
+                            None if pd.isna(row[LIM]) else float(row[LIM])))
         if nove != P.body:
             ss.historie = (ss.historie + [copy.deepcopy(P.body)])[-30:]
             P.body = nove
@@ -808,6 +840,46 @@ with tabs[4]:
         st.dataframe(report.tab_rozpocet(R), hide_index=True, width="stretch")
         st.caption("Ceny jsou orientační (±40 %), vhodné pro porovnání variant. Jednotkové ceny lze upravit vlevo.")
 
+@st.fragment
+def auto_sekce_gui(R, RJ, J):
+    """Porovnání s autem – fragment, aby kliknutí nepřepnulo kartu a nepřepočítávalo zbytek stránky."""
+    st.subheader("🚗 Porovnání s autem")
+    from planovac import auto as auto_mod
+
+    cz = st.columns([2, 2, 1])
+    zdroj_auto = cz[0].selectbox("Zdroj času autem", ["auto", "mapy", "osrm"], key="auto_zdroj",
+                                 format_func={"auto": "Automaticky (Mapy.cz s klíčem, jinak OSRM)",
+                                              "mapy": "Mapy.cz (API klíč)", "osrm": "OSRM (bez klíče)"}.get)
+    klic_in = cz[1].text_input("Mapy.cz API klíč", value=auto_mod.nacti_klic(), type="password",
+                               help="Zdarma na developer.mapy.com → Routing API. Uloží se jen lokálně "
+                                    "(data/nastaveni.json), nebo nastavte proměnnou MAPY_API_KEY.")
+    if klic_in != auto_mod.nacti_klic() and not os.environ.get("MAPY_API_KEY"):
+        auto_mod.uloz_klic(klic_in)
+    cz[2].write("")
+    if cz[2].button("🚗 Načíst", width="stretch", help="Zjistí dobu jízdy autem mezi stanicemi"):
+        with st.spinner("Ptám se routovací služby …"):
+            R.auto, R.auto_varovani = auto_mod.jizda_autem(report.stanice_pro_auto(R), zdroj_auto)
+    if R.auto:
+        ta = report.tab_auto(RJ, R.auto, J)
+        st.dataframe(ta, hide_index=True, width="stretch")
+        st.caption("Zdroj: " + ", ".join(sorted({a.zdroj for a in R.auto})) + ". Čas autem je bez dopravní "
+                   "situace (orientační); vlak = vybraný vlak a linka výše. Kladný rozdíl = vlak je rychlejší.")
+        try:
+            import plotly.graph_objects as go
+
+            cel = ta[ta["Z"] != "CELKEM"]
+            fig = go.Figure([go.Bar(name="Vlak", x=cel["Z"] + " → " + cel["Do"],
+                                    y=[report.cas_min(x) for x in cel["Vlak"]], marker_color="#1d4ed8"),
+                             go.Bar(name="Auto", x=cel["Z"] + " → " + cel["Do"],
+                                    y=[report.cas_min(x) for x in cel["Auto"]], marker_color="#9ca3af")])
+            fig.update_layout(barmode="group", height=300, margin=dict(l=10, r=10, t=10, b=10),
+                              yaxis_title="minut")
+            st.plotly_chart(fig, width="stretch", key="pl_auto")
+        except Exception:
+            pass
+    for w_ in R.auto_varovani:
+        st.warning(w_)
+
 with tabs[5]:
     if R is None:
         _no_result()
@@ -853,6 +925,7 @@ with tabs[5]:
         st.plotly_chart(report.fig_rychlost(R, J), width="stretch", key="pl_rychlost2")
         st.caption(f"Jízdní doby obsahují přirážku {R.project.vlak.rezerva_pct:.0f} % a pobyt v každé zastávce "
                    f"{R.project.vlak.pobyt_stanice_s:.0f} s. Žluté pásy = úseky se sníženou rychlostí.")
+        auto_sekce_gui(R, RJ, J)
         st.subheader("Porovnání vlaků (všechny zastávky / bez zastavení)")
         st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
 

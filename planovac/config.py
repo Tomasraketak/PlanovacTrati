@@ -26,6 +26,7 @@ class Bod:
     lat: float
     lon: float
     typ: str = TYP_STANICE
+    max_rychlost_kmh: float | None = None   # limit rychlosti úseku od tohoto bodu k dalšímu (None = globální)
 
     @property
     def je_stanice(self) -> bool:
@@ -68,6 +69,13 @@ class NavrhoveParametry:
         if self.min_polomer_m:
             return float(self.min_polomer_m)
         r = 11.8 * self.rychlost_kmh ** 2 / (self.prevyseni_mm + self.nedostatek_prevyseni_mm)
+        return math.ceil(r / 50.0) * 50.0
+
+    def min_polomer_pro(self, v_kmh: float) -> float:
+        """Minimální poloměr pro sníženou rychlost ``v_kmh`` (nikdy větší než pro návrhovou rychlost)."""
+        if self.min_polomer_m:
+            return float(self.min_polomer_m) * min(1.0, (v_kmh / self.rychlost_kmh) ** 2)
+        r = 11.8 * min(v_kmh, self.rychlost_kmh) ** 2 / (self.prevyseni_mm + self.nedostatek_prevyseni_mm)
         return math.ceil(r / 50.0) * 50.0
 
     def doporuceny_polomer(self) -> float:
@@ -345,6 +353,8 @@ class Project:
                 err.append(f"Bod {i + 1} ({b.nazev}) má neplatné souřadnice.")
             if b.typ not in TYPY_BODU:
                 err.append(f"Bod {i + 1} ({b.nazev}) má neznámý typ '{b.typ}'.")
+            if b.max_rychlost_kmh is not None and not (40 <= b.max_rychlost_kmh <= self.navrh.rychlost_kmh):
+                err.append(f"Limit rychlosti úseku za bodem {i + 1} ({b.nazev}) musí být 40–{self.navrh.rychlost_kmh:.0f} km/h.")
         if self.body and self.body[0].typ != TYP_STANICE:
             err.append("První bod musí být stanice.")
         if self.body and self.body[-1].typ != TYP_STANICE:

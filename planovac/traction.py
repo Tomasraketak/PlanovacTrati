@@ -41,12 +41,25 @@ class JizdniDoby:
     linka: str = ""
 
 
+def limity_useku(body, body_s) -> list[tuple[float, float, float]]:
+    """Ručně zadané limity rychlosti po úsecích: [(s0, s1, v_kmh)] – limit bodu k platí do bodu k+1."""
+    out = []
+    for k, b in enumerate(body[:-1]):
+        v = getattr(b, "max_rychlost_kmh", None)
+        if v:
+            out.append((float(body_s[k]), float(body_s[k + 1]), float(v)))
+    return out
+
+
 def speed_limit(krivost: np.ndarray, navrh: NavrhoveParametry, vlak: Vlak, ds: float = 10.0,
-                delka_vlaku_m: float = 200.0) -> np.ndarray:
-    """Nejvyšší dovolená rychlost [km/h] v každém bodě osy."""
+                delka_vlaku_m: float = 200.0, limity=None, s: np.ndarray | None = None) -> np.ndarray:
+    """Nejvyšší dovolená rychlost [km/h] v každém bodě osy (``limity`` = ručně zadané úseky [(s0, s1, v)])."""
     from scipy.ndimage import minimum_filter1d
 
     v = np.full(len(krivost), min(navrh.rychlost_kmh, vlak.max_rychlost_kmh), dtype=float)
+    if limity and s is not None:
+        for s0, s1, vl in limity:
+            v[(s >= s0) & (s <= s1)] = np.minimum(v[(s >= s0) & (s <= s1)], vl)
     k = np.abs(krivost)
     with np.errstate(divide="ignore"):
         R = np.where(k > 1e-9, 1.0 / k, np.inf)
@@ -99,10 +112,10 @@ def simulate(s: np.ndarray, z: np.ndarray, vlim_kmh: np.ndarray, stops: list[flo
 
 
 def compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry, vlak: Vlak,
-            linka: Linka | None = None) -> JizdniDoby:
+            linka: Linka | None = None, limity=None) -> JizdniDoby:
     """Jízdní doby; ``linka`` určuje, ve kterých stanicích vlak zastavuje (None = ve všech)."""
     ds = float(np.median(np.diff(s))) if len(s) > 1 else 10.0
-    vlim = speed_limit(krivost, navrh, vlak, ds)
+    vlim = speed_limit(krivost, navrh, vlak, ds, limity=limity, s=s)
     st_s = [bs for bs, js in zip(body_s, je_stanice) if js]
     st_n = [nm for nm, js in zip(body_nazvy, je_stanice) if js]
     zastavuje = [k in (0, len(st_s) - 1) or linka is None or linka.zastavuje(st_n[k]) for k in range(len(st_s))]
@@ -149,14 +162,14 @@ class BunkaMatice:
 
 
 def matice_jizdnich_dob(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry, zaklad: Vlak,
-                        linky: list[Linka]) -> list[BunkaMatice]:
+                        linky: list[Linka], limity=None) -> list[BunkaMatice]:
     """Jízdní doby pro každý vlak (předvolby) × každou linku."""
     out = []
     L = (s[-1] - s[0]) / 1000.0
     for nazev in VLAKY:
         v = Vlak.z_predvolby(nazev, pobyt_stanice_s=zaklad.pobyt_stanice_s, rezerva_pct=zaklad.rezerva_pct)
         for li in linky:
-            j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v, li)
+            j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v, li, limity)
             nz = sum(1 for x in j.jizdni_rad[1:-1] if x[3])
             out.append(BunkaMatice(nazev, li.nazev, j.celkem_s, L / max(j.celkem_s / 3600, 1e-9), nz))
     return out
@@ -173,12 +186,12 @@ class PorovnaniVlaku:
 
 
 def porovnani_vlaku(s, z, krivost, body_s, body_nazvy, je_stanice, navrh: NavrhoveParametry,
-                    zaklad: Vlak) -> list[PorovnaniVlaku]:
+                    zaklad: Vlak, limity=None) -> list[PorovnaniVlaku]:
     """Jízdní doby pro všechny předvolby vlaků (pobyt a rezerva z ``zaklad``)."""
     out = []
     for nazev in VLAKY:
         v = Vlak.z_predvolby(nazev, pobyt_stanice_s=zaklad.pobyt_stanice_s, rezerva_pct=zaklad.rezerva_pct)
-        j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v)
+        j = compute(s, z, krivost, body_s, body_nazvy, je_stanice, navrh, v, None, limity)
         L = (s[-1] - s[0]) / 1000.0
         out.append(PorovnaniVlaku(nazev, v.max_rychlost_kmh, j.celkem_s, j.express_s,
                                   L / max(j.celkem_s / 3600, 1e-9), j))

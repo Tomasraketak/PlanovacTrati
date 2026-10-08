@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("-o", "--out", default=None, help="výstupní složka (výchozí vystupy/<název souboru>)")
     run.add_argument("--demo", action="store_true", help="použít syntetický terén (bez internetu)")
     run.add_argument("--rozliseni", type=float, default=None, help="rozlišení rastru v metrech")
+    run.add_argument("--auto", action="store_true",
+                     help="porovnat jízdní dobu s autem (Mapy.cz při MAPY_API_KEY, jinak OSRM)")
     run.add_argument("-q", "--quiet", action="store_true")
     new = sub.add_parser("novy", help="vytvoří šablonu projektu")
     new.add_argument("soubor")
@@ -45,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
         p.vypocet.rozliseni_m = args.rozliseni
     out = Path(args.out) if args.out else Path("vystupy") / Path(args.projekt).stem
     res = run_project(p)
+    if args.auto:
+        from .auto import jizda_autem
+        from .report import stanice_pro_auto
+
+        res.auto, res.auto_varovani = jizda_autem(stanice_pro_auto(res))
     files = export_all(res, out)
     print()
     print(souhrn_text(res))

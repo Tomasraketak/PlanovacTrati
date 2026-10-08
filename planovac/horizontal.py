@@ -161,10 +161,12 @@ def _fit_radii(pis, Rmin, Rpref):
 
 
 def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=150.0, ds=10.0,
-                  zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None
-                  ) -> Alignment:
+                  zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None,
+                  rmin_useky: list[float] | None = None) -> Alignment:
     """Vloží přímé a oblouky do koridorů.
 
+    ``rmin_useky`` – min. poloměr pro každý úsek mezi sousedními zadanými body (ručně snížená rychlost úseku);
+    vrchol patří úseku, jehož koridor je mu nejblíž.
     ``zony`` – úseky se sníženou rychlostí [(s0, s1, Rmin_zóny)] ve staničení osy ``ref_xy``;
     vrcholy, které na ni padnou do zóny, smí mít oblouk až s poloměrem Rmin_zóny.
     """
@@ -176,6 +178,16 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
         pis = [p for k, p in enumerate(pis) if p.fixed or k in (0, len(pis) - 1) or d0[k] > np.radians(0.05)]
     for p in pis:
         p.rmin = Rmin
+    if rmin_useky and any(r < Rmin - 1e-6 for r in rmin_useky):
+        from shapely.geometry import LineString, Point
+
+        cesty = [LineString(np.asarray(sp, float)) for sp in seg_paths]
+        for p in pis:
+            if p.fixed:
+                continue
+            pt = Point(p.xy)
+            i = int(np.argmin([c.distance(pt) for c in cesty]))
+            p.rmin = min(p.rmin, rmin_useky[i])
     if zony and ref_xy is not None and len(ref_xy) > 1:
         from shapely.geometry import LineString, Point
 

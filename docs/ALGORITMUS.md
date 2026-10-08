@@ -112,6 +112,13 @@ Plná rychlost vyžaduje velké oblouky, takže osa někde „řízne“ přes o
 Demolice se v optimalizaci (koridor, niveleta, klasifikace, výběr úseků) počítají s **penalizací +40 mil. Kč/dům**
 navíc k ceně výkupu; rozpočet obsahuje jen skutečnou cenu výkupu.
 
+## 7c. Ruční limity rychlosti úseků a porovnání s autem
+`Bod.max_rychlost_kmh` je limit úseku od bodu k dalšímu bodu. V `horizontal.fit_alignment(rmin_useky=…)` dostane
+každý vrchol (podle nejbližšího koridoru) nejmenší poloměr `NavrhoveParametry.min_polomer_pro(v)` svého úseku; v
+`traction.speed_limit(limity=…)` se rychlost v úseku omezí na limit (minimum se rozšíří o délku vlaku jako u oblouků).
+Limity se předávají i do přepočtu vlak × linka. `auto.py` zjišťuje dobu jízdy autem mezi stanicemi (Mapy.cz routing,
+záložně OSRM; cache na disku) a `report.tab_auto` ji porovná s jízdním řádem.
+
 ## 8. Rozpočet a jízdní doby
 - **Rozpočet** (`costs.py`): délky × jednotkové ceny + kubatury + portály + křížení + stanice + demolice +
   pozemky, k tomu projekce (10 %) a rezerva (20 %).

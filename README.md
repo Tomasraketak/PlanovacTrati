@@ -73,6 +73,12 @@ py -3 -m venv .venv
 
 ---
 
+## 🆕 Novinky v 1.6
+
+- **Limit rychlosti po úsecích** – v tabulce bodů lze ke každému bodu zadat max. rychlost úseku k dalšímu bodu; ovlivní
+  jízdní dobu i nejmenší poloměr oblouků v úseku.
+- **Vlak × auto** – porovnání jízdních dob vlaku a auta mezi stanicemi (Mapy.cz API s klíčem, jinak OSRM).
+
 ## 🧭 Jak se to používá
 
 1. Vlevo v **📁 Projekt** vyberte `cb_jh_jihlava` (přednastaveno) nebo `demo` (bez internetu, hotovo za pár

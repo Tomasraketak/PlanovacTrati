@@ -118,6 +118,16 @@ def souhrn_text(r: Result) -> str:
     if r.porovnani_vlaku and not r.matice:
         lines.append("Jízdní doby podle vlaku (všechny zastávky / bez zastavení):")
         lines += [f"  • {c.vlak}: {fmt_cas(c.celkem_s)} / {fmt_cas(c.express_s)}" for c in r.porovnani_vlaku]
+    lim = tab_limity(r)
+    if len(lim):
+        lines.append("Ručně omezená rychlost: " + "; ".join(
+            f"{x['Z']} → {x['Do']} {x['Limit [km/h]']} km/h" for _, x in lim.iterrows()))
+    if r.auto:
+        t = tab_auto(r, r.auto)
+        if len(t):
+            lines.append("Vlak × auto (" + ", ".join(sorted({a.zdroj for a in r.auto})) + "):")
+            lines += [f"  • {x['Z']} → {x['Do']}: vlak {x['Vlak']}, auto {x['Auto']} (rozdíl {x['Rozdíl [min]']} min)"
+                      for _, x in t.iterrows()]
     zd = getattr(r.osm, "zdroje", {})
     if zd:
         lines.append("Zdroje dat: " + "; ".join(f"{k} – {v}" for k, v in zd.items()))
@@ -193,6 +203,63 @@ def tab_useky_jizdy(r: Result) -> pd.DataFrame:
     return pd.DataFrame([{"Z": x.z, "Do": x.do, "Délka [km]": round(x.delka_km, 1),
                           "Jízdní doba": fmt_cas(x.jizdni_doba_s), "Průměrná rychlost [km/h]": round(x.prumerna_kmh)}
                          for x in r.jizda.radky])
+
+
+def stanice_pro_auto(r: Result) -> list[tuple[str, float, float]]:
+    """Stanice a zastávky trasy v pořadí jízdy: (název, lat, lon)."""
+    return [(b.nazev, b.lat, b.lon) for b in r.project.body if b.je_stanice]
+
+
+def tab_auto(r: Result, auto: list, jizda=None) -> pd.DataFrame:
+    """Vlak × auto mezi zastávkami jízdního řádu a celkem. ``auto`` = řádky z ``auto.jizda_autem``."""
+    jizda = jizda or r.jizda
+    idx = {a.z: i for i, a in enumerate(auto)}
+    nazvy = [a.z for a in auto] + ([auto[-1].do] if auto else [])
+    rows = []
+
+    def radek(z, do, km_v, t_v):
+        if z not in nazvy or do not in nazvy:
+            return None
+        i0, i1 = nazvy.index(z), nazvy.index(do)
+        if i1 <= i0:
+            return None
+        seg = auto[i0:i1]
+        km_a, t_a = sum(x.delka_km for x in seg), sum(x.cas_s for x in seg)
+        return {"Z": z, "Do": do, "Trať [km]": round(km_v, 1), "Silnice [km]": round(km_a, 1),
+                "Vlak": fmt_cas(t_v), "Auto": fmt_cas(t_a), "Rozdíl [min]": round((t_a - t_v) / 60.0, 1),
+                "Vlak / auto": f"{100 * t_v / max(t_a, 1):.0f} %",
+                "Ø vlak [km/h]": round(km_v / max(t_v / 3600, 1e-9)), "Ø auto [km/h]": round(km_a / max(t_a / 3600, 1e-9))}
+
+    for x in jizda.radky:
+        rw = radek(x.z, x.do, x.delka_km, x.jizdni_doba_s)
+        if rw:
+            rows.append(rw)
+    if jizda.radky and auto:
+        z0, z1 = jizda.radky[0].z, jizda.radky[-1].do
+        km = sum(x.delka_km for x in jizda.radky)
+        rw = radek(z0, z1, km, jizda.celkem_s)
+        if rw:
+            rw["Z"], rw["Do"] = "CELKEM", f"{z0} → {z1}"
+            rows.append(rw)
+    return pd.DataFrame(rows)
+
+
+def cas_min(txt: str) -> float:
+    """"h:mm:ss" / "m:ss" → minuty."""
+    p = [int(x) for x in str(txt).split(":")]
+    return (p[0] * 3600 + p[1] * 60 + p[2]) / 60 if len(p) == 3 else (p[0] * 60 + p[1]) / 60 if len(p) == 2 else 0.0
+
+
+def tab_limity(r: Result) -> pd.DataFrame:
+    """Ručně zadané limity rychlosti úseků (Bod → další bod)."""
+    rows = []
+    b = r.project.body
+    for k, x in enumerate(b[:-1]):
+        if x.max_rychlost_kmh:
+            L = (r.osa.body_s[k + 1] - r.osa.body_s[k]) / 1000.0
+            rows.append({"Z": x.nazev, "Do": b[k + 1].nazev, "Délka [km]": round(L, 1),
+                         "Limit [km/h]": int(x.max_rychlost_kmh)})
+    return pd.DataFrame(rows)
 
 
 def tab_prodlouzeni(r: Result) -> pd.DataFrame:
@@ -524,6 +591,11 @@ def fig_rychlost(r: Result, jizda=None):
     for u in r.omezeni:
         fig.add_vrect(x0=u.s0 / 1000, x1=u.s1 / 1000, fillcolor="#f1c40f", opacity=0.25, line_width=0,
                       annotation_text=f"{u.rychlost_kmh:.0f}", annotation_position="top left")
+    for k, b in enumerate(r.project.body[:-1]):
+        if b.max_rychlost_kmh:
+            fig.add_vrect(x0=r.osa.body_s[k] / 1000, x1=r.osa.body_s[k + 1] / 1000, fillcolor="#7f8c8d",
+                          opacity=0.15, line_width=0, annotation_text=f"limit {b.max_rychlost_kmh:.0f}",
+                          annotation_position="bottom left")
     fig.add_trace(go.Scatter(x=km, y=j.vlim_kmh, name="dovolená rychlost", line=dict(color="#95a5a6", dash="dot")))
     fig.add_trace(go.Scatter(x=km, y=j.v_express_kmh, name="bez zastavení", line=dict(color="#e67e22")))
     fig.add_trace(go.Scatter(x=km, y=j.v_kmh, name=f"{j.vlak or 'vlak'} – všechny zastávky",
@@ -697,6 +769,7 @@ min. poloměr {r.project.navrh.min_polomer():.0f} m · vygenerováno {datetime.n
 <section><h2>Rozpočet (orientační)</h2>{tbl(tab_rozpocet(r))}</section>
 <section><h2>Jízdní řád – {html.escape(r.project.vlak.nazev)}</h2>{tbl(tab_jizdni_rad(r))}<h3>Úseky</h3>{tbl(tab_useky_jizdy(r))}
 <h3>Porovnání vlaků</h3>{tbl(tab_porovnani_vlaku(r))}<h3>Vlak × linka (celkové jízdní doby)</h3>{tbl(tab_matice(r))}</section>
+{auto_sekce(r, tbl)}
 <section><h2>Varianty koridoru: obchvat × tunel pod městem</h2>
 <p>Kritérium J = cena + penalizace demolic + {r.project.vahy.hodnota_casu_mil_min:.0f} mil. Kč × minuty jízdní doby.</p>{tbl(tab_varianty(r))}</section>
 <section><h2>Souběh se stávající tratí a silnicemi</h2><p>Sleva {r.sleva_soubeh_mil:,.0f} mil. Kč</p>{tbl(tab_soubeh(r))}</section>
@@ -708,6 +781,16 @@ min. poloměr {r.project.navrh.min_polomer():.0f} m · vygenerováno {datetime.n
 <section><h2>Chráněná území</h2>{tbl(tab_chranena(r))}</section>
 </main><footer>Data: Copernicus DEM GLO-30 © DLR/ESA, © přispěvatelé OpenStreetMap (ODbL). Výsledky jsou orientační studie,
 nikoli projektová dokumentace.</footer></body></html>"""
+
+
+def auto_sekce(r: Result, tbl) -> str:
+    if not r.auto:
+        return ""
+    t = tab_auto(r, r.auto)
+    zdroj = ", ".join(sorted({a.zdroj for a in r.auto}))
+    w = "".join(f"<li>{html.escape(x)}</li>" for x in r.auto_varovani)
+    return (f"<section><h2>Vlak × auto</h2><p>Čas autem: {html.escape(zdroj)} (bez zácp a dopravní situace, "
+            f"orientační).</p>{tbl(t)}" + (f"<ul>{w}</ul>" if w else "") + "</section>")
 
 
 def export_all(r: Result, out_dir: str | Path) -> dict[str, Path]:

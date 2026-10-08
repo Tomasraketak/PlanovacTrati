@@ -1,6 +1,8 @@
 """Úpravy seznamu bodů trasy (stanice a průjezdní body) – používá GUI při klikání do mapy."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from .config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, Bod
@@ -78,7 +80,7 @@ def prepni_typ(body: list[Bod], i: int, novy: str | None = None) -> list[Bod]:
     out = list(body)
     b = out[i]
     typ = novy or poradi[(poradi.index(b.typ) + 1) % len(poradi)]
-    out[i] = Bod(b.nazev, b.lat, b.lon, typ)
+    out[i] = replace(b, typ=typ)
     return out
 
 

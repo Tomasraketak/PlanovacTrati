@@ -97,6 +97,22 @@ vesnici, kopci nebo údolí. Úsek se použije jen tehdy, když **ušetří ales
 alespoň 5 domů** (obojí nastavitelné) – a nikdy nesmí počet demolic zvýšit. Na kartě *🏗️ Stavby* je tabulka použitých úseků i protokol, co všechno
 program zkoušel; v mapě jsou žlutě, v grafu rychlosti jako žluté pásy.
 
+### 🐇 Limit rychlosti po úsecích
+V tabulce bodů (karta *Trasa a zastávky*) je sloupec **Max. rychlost k dalšímu bodu [km/h]** (nebo pole ve
+panelu vybraného bodu). Limit platí v úseku od daného bodu k následujícímu – mezi libovolnými stanicemi,
+zastávkami i průjezdními body; prázdné pole = platí globální návrhová rychlost. Limit (a) omezí rychlost vlaku
+a prodlouží jízdní dobu, (b) v daném úseku **zmenší nejmenší povolený poloměr oblouků** (R = 11,8·V²/(D+I)), takže
+trasa smí být přímější a levnější, a (c) je v grafu rychlosti šedým pásem a v souhrnu. Limit patří bodu – při
+změně pořadí bodů se přesouvá s ním.
+
+### 🚗 Porovnání s autem
+Na kartě *⏱️ Jízdní doby* tlačítko **🚗 Načíst** zjistí dobu jízdy autem mezi stanicemi a porovná ji s vlakem
+(zvolený vlak a linka): vzdálenost po trati a po silnici, časy, rozdíl v minutách, poměr a průměrné rychlosti,
+včetně řádku CELKEM a grafu. Zdroj: **Mapy.cz** routing API (API klíč zdarma na <https://developer.mapy.com>,
+zadejte v poli *Mapy.cz API klíč* – uloží se jen lokálně, nebo proměnná prostředí `MAPY_API_KEY`); bez klíče nebo při
+chybě se použije **OSRM** (veřejné, bez dopravní situace). Z příkazové řádky: `planovac.bat run projekt.yaml --auto`.
+Časy autem jsou orientační (bez zácp, semaforů mimo to, co ví služba).
+
 ### 🚆 Vlak
 Vyberte vlak: **RegioPanter (ČD 640)**, **Railjet**, **Pendolino (ČD 680, naklápěcí – rychleji v obloucích)**,
 **ICE 3**, **TGV Euroduplex**, nebo *vlastní*. Předvolby mají orientační reálné parametry (výkon, hmotnost,
