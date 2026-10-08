@@ -266,6 +266,8 @@ with st.sidebar:
                        "overture": "Jen Overture Maps"}.get,
           help="Overpass bývá přetížený – v automatickém režimu se při jeho výpadku data načtou z Overture Maps "
                "(budovy, silnice, železnice, voda, zástavba, sídla). Chráněná území má jen Overpass.")
+        w(vy, "zpresneni_osy", "Zpřesnit osu kolem budov (odtlačit od domů)", "check",
+          help="Po vložení oblouků lokálně posune vrcholy osy tak, aby zasáhla méně budov; výpočet se prodlouží o desítky sekund.")
         w(vy, "chranena_uzemi", "Stahovat chráněná území", "check")
         w(vy, "okraj_km", "Okraj oblasti [km]", min_value=0.0, max_value=30.0, step=1.0)
         w(vy, "tolerance_zjednoduseni_m", "Tolerance zjednodušení osy [m]", min_value=20.0, max_value=1000.0, step=10.0)
@@ -369,6 +371,14 @@ def koeficienty_tab():
             w(k, "pen_zastavba_uvnitr", "Uvnitř zástavby", min_value=0.0, step=1.0)
             w(k, "pen_zastavba_pas", "Pás 300 m kolem zástavby", min_value=0.0, step=0.5)
             w(k, "pen_budovy", "Hustota budov (samoty, chaty)", min_value=0.0, step=0.5)
+            w(k, "pen_budovy_u_stanic", "Penalizace budov v okruhu stanic (0–1)", min_value=0.0, max_value=1.0, step=0.1,
+              help="1 = i u stanic se domům vyhýbáme stejně jako jinde (doporučeno); 0 = v okruhu stanice se domy "
+                   "nepenalizují (trať smí do města bourat).")
+            w(k, "demolice_nasobek", "Zpřesnění osy: váha demolice (×)", min_value=0.0, max_value=20.0, step=0.5,
+              help="Po vložení oblouků se vrcholy osy lokálně posouvají, aby se osa vyhnula domům. Čím vyšší váha, "
+                   "tím víc se osa domům vyhýbá (i za cenu delší či dražší trati).")
+            w(k, "demolice_polomer_m", "Zpřesnění osy: zasažená budova do [m] od osy", min_value=5.0, max_value=60.0,
+              step=1.0)
             w(k, "tunel_ekvivalent", "Tunel pod městem – ekvivalent (0 = z cen)", min_value=0.0, step=0.5)
             w(k, "tunel_min_sirka_mesta_m", "Min. šířka města pro tunel [m]", min_value=100.0, step=50.0)
         with b:

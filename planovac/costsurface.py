@@ -171,7 +171,11 @@ def build_cost_surfaces(
             pen_obce = np.where(tm, np.minimum(pen_obce, ekv), pen_obce)
             pen_bud = np.where(tm, f32(0), pen_bud)
             pen_factor = np.where(tm, f32(1), pen_factor)
-        cost = (vahy.delka * 1.0 + vahy.obce * pen_obce * pen_factor + vahy.budovy * pen_bud * pen_factor
+        # okruh stanic zmírňuje jen penalizaci zástavby (trať smí do města), ne bourání domů
+        bud_factor = 1.0 - L["vyjimka"] * (1.0 - koef.pen_budovy_u_stanic)
+        if tunel_mesto and zast.any():
+            bud_factor = np.where(tm, f32(1), bud_factor)
+        cost = (vahy.delka * 1.0 + vahy.obce * pen_obce * pen_factor + vahy.budovy * pen_bud * bud_factor
                 + vahy.teren * L["pen_teren"] + vahy.voda * L["pen_voda"]
                 + vahy.chranena_uzemi * L["pen_chran"]).astype(f32)
         sf = np.ones(grid.shape, dtype=f32)

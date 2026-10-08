@@ -112,6 +112,14 @@ Plná rychlost vyžaduje velké oblouky, takže osa někde „řízne“ přes o
 Demolice se v optimalizaci (koridor, niveleta, klasifikace, výběr úseků) počítají s **penalizací +40 mil. Kč/dům**
 navíc k ceně výkupu; rozpočet obsahuje jen skutečnou cenu výkupu.
 
+## 7d. Vyhýbání se budovám
+Příčiny demolic se ukázaly dvě: okruh stanic vypínal i penalizaci budov a vložení oblouků „narovnalo“ koridor, který
+se domům vyhýbal (koridor 13 budov do 12 m, osa po obloucích přes 170). Oprava: penalizace budov platí i u stanic
+(`Koeficienty.pen_budovy_u_stanic`), souběh se stávajícími tratěmi je ve výchozím stavu zapnutý a `horizontal.zlepsi_osu`
+po vložení oblouků posouvá vrcholy kolmo na trať (souřadnicový sestup), minimalizuje součet nákladů podél osy z nákladové
+mapy a pokut `P` za budovy blíž než `r` od osy, při dodržení minimálních poloměrů. Zkouší se několik `r`; vyhrává
+varianta s nejnižším J ze skutečného vyhodnocení.
+
 ## 7c. Ruční limity rychlosti úseků a porovnání s autem
 `Bod.max_rychlost_kmh` je limit úseku od bodu k dalšímu bodu. V `horizontal.fit_alignment(rmin_useky=…)` dostane
 každý vrchol (podle nejbližšího koridoru) nejmenší poloměr `NavrhoveParametry.min_polomer_pro(v)` svého úseku; v

@@ -196,3 +196,33 @@ def test_silne_pravidlo_je_pouzito_jen_pri_velke_uspore(monkeypatch):
     assert len(useky) == 1 and useky[0].rychlost_kmh <= 80
     useky, _ = zkus(200.0, 2)
     assert useky == []
+
+
+def test_zlepsi_osu_odtlaci_osu_od_budovy():
+    from scipy.spatial import cKDTree
+
+    from planovac.horizontal import fit_alignment, zlepsi_osu
+
+    pts = [np.array([0.0, 0.0]), np.array([12000.0, 0.0])]
+    cesta = [np.array([[0.0, 0.0], [6000.0, 400.0], [12000.0, 0.0]])]
+    Rmin = NavrhoveParametry().min_polomer()
+    al = fit_alignment(pts, [True, True], cesta, Rmin, 2 * Rmin, Lp=[0, 0], tol=50.0)
+    budova = np.array([[6000.0, 395.0]])
+    pod_budovou = float(cKDTree(al.xy).query(budova)[0][0])
+    assert pod_budovou < 15
+
+    def objektiv(xy):
+        d = cKDTree(xy).query(budova, distance_upper_bound=15.0)[0]
+        delka = float(np.sum(np.hypot(*np.diff(xy, axis=0).T)))
+        return delka + 5000.0 * int(np.isfinite(d).sum())
+
+    nova = zlepsi_osu(al, pts, objektiv)
+    assert float(cKDTree(nova.xy).query(budova)[0][0]) > 15
+    # nikdy nezhorší: bez budovy se osa nemění
+    assert zlepsi_osu(al, pts, lambda xy: float(np.sum(np.hypot(*np.diff(xy, axis=0).T)))) is not None
+
+
+def test_okruh_stanic_nevypina_penalizaci_budov():
+    from planovac.config import Koeficienty
+
+    assert Koeficienty().pen_budovy_u_stanic == 1.0

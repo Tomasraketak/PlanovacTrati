@@ -42,6 +42,9 @@ class Alignment:
     prvky: list[Prvek]
     body_s: list[float]       # staničení zadaných bodů trasy
     varovani: list[str] = field(default_factory=list)
+    pis: list | None = None   # vrcholy lomené čáry (pro další zpřesnění osy), viz ``zlepsi_osu``
+    Rmin: float = 0.0
+    Rpref: float = 0.0
 
     @property
     def delka(self) -> float:
@@ -237,7 +240,9 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
                 f"Oblouk u vrcholu {k} má poloměr jen {R[k]:.0f} m (< {Rmin:.0f} m) – stanice/průjezdní body "
                 "jsou příliš blízko sebe nebo v ostrém úhlu; v oblouku platí snížená rychlost."
             )
-    return _generate(pis, R, delta, points_xy, ds, varovani)
+    al = _generate(pis, R, delta, points_xy, ds, varovani)
+    al.pis, al.Rmin, al.Rpref = pis, Rmin, Rpref
+    return al
 
 
 def _generate(pis, R, delta, points_xy, ds, varovani) -> Alignment:
@@ -299,3 +304,65 @@ def _generate(pis, R, delta, points_xy, ds, varovani) -> Alignment:
         d = np.hypot(xy[:, 0] - p[0], xy[:, 1] - p[1])
         body_s.append(float(s[int(np.argmin(d))]))
     return Alignment(xy=xy, s=s, krivost=k_arr, prvky=prvky, body_s=body_s, varovani=varovani)
+
+
+# ----------------------------------------------------------------- zpřesnění osy proti hustému okolí
+
+def zlepsi_osu(al: Alignment, points_xy, objective, ds: float = 10.0, offsets=(-250.0, -120.0, -60.0, -30.0, -12.0, 12.0, 30.0, 60.0, 120.0, 250.0),
+               sweeps: int = 6, max_posun: float = 600.0, vhodne=None) -> Alignment:
+    """Lokální zpřesnění osy: posouvá vrcholy (PI) kolmo na trať tak, aby klesla hodnota ``objective(xy)``
+    (součet nákladů podél osy + pokuta za zasažené budovy), a to jen při zachování minimálních poloměrů.
+
+    Koridor vzniká bez ohledu na zakřivení; vložení oblouků jej pak „narovná“ a osa může zasáhnout domy, kterým se
+    koridor vyhnul. Tento krok je po vložení oblouků znovu odtlačí. Nikdy nezhorší hodnotu ``objective``.
+    ``vhodne(k, xy_okoli) -> bool`` (volitelné) – přeskočí vrcholy, kde nic nehrozí.
+    """
+    if al.pis is None or len(al.pis) < 3:
+        return al
+    pis = [_PI(p.xy.copy(), p.fixed, p.req_after, p.sym_after, p.rmin) for p in al.pis]
+    puvodni = [p.xy.copy() for p in pis]
+    Rmin, Rpref = al.Rmin, al.Rpref
+
+    def hodnota(seznam):
+        R, delta = _fit_radii(seznam, Rmin, Rpref)
+        rm = np.array([p.rmin for p in seznam])
+        # porušení minimálního poloměru (už původní osa je může mít) se silně penalizuje – nesmí přibýt
+        poruseni = 0.0
+        for k in range(1, len(seznam) - 1):
+            if delta[k] > 1e-6 and R[k] < rm[k] - 1e-6:
+                poruseni += (rm[k] - R[k]) / rm[k]
+        a = _generate(seznam, R, delta, points_xy, ds, [])
+        return float(objective(a.xy)) + 1e7 * poruseni, R, delta
+
+    best, R0, d0 = hodnota(pis)
+    start = best
+    for _ in range(sweeps):
+        zlepseno = False
+        for k in range(1, len(pis) - 1):
+            if pis[k].fixed:
+                continue
+            if vhodne is not None and not vhodne(k, pis[k - 1].xy, pis[k].xy, pis[k + 1].xy):
+                continue
+            t = _unit(pis[k + 1].xy - pis[k - 1].xy)
+            nrm = np.array([-t[1], t[0]])
+            orig = pis[k].xy.copy()
+            lok_best, lok_xy = best, None
+            for off in offsets:
+                novy = orig + off * nrm
+                if np.hypot(*(novy - puvodni[k])) > max_posun:
+                    continue
+                pis[k].xy = novy
+                h, _, _ = hodnota(pis)
+                if h < lok_best - 1e-9:
+                    lok_best, lok_xy = h, novy
+            pis[k].xy = lok_xy if lok_xy is not None else orig
+            if lok_xy is not None:
+                best, zlepseno = lok_best, True
+        if not zlepseno:
+            break
+    if best >= start - 1e-9:
+        return al
+    R, delta = _fit_radii(pis, Rmin, Rpref)
+    novy = _generate(pis, R, delta, points_xy, ds, list(al.varovani))
+    novy.pis, novy.Rmin, novy.Rpref = pis, Rmin, Rpref
+    return novy

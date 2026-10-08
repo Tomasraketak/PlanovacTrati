@@ -194,7 +194,7 @@ class Soubeh:
     silnice_vzdalenost_m: float = 10.0     # osa do 10 m od okraje vozovky
     silnice_sleva_pct: float = 25.0
     silnice_tridy: str = "motorway,trunk,primary"  # dálnice, silnice pro motorová vozidla, I. třída
-    pritahovat: bool = False               # zvýhodnit souběh už v nákladové mapě (rastr ±4 m nezaručí;
+    pritahovat: bool = True                # zvýhodnit souběh už v nákladové mapě (rastr ±4 m nezaručí;
     #                                        může trasu i zhoršit) – sleva na výsledné ose platí vždy
 
 
@@ -208,6 +208,7 @@ class Koeficienty:
 
     pen_zastavba_uvnitr: float = 40.0   # uvnitř zástavby obce
     pen_zastavba_pas: float = 8.0       # pás 300 m kolem zástavby (klesá s odstupem)
+    pen_budovy_u_stanic: float = 1.0       # podíl penalizace budov platný i v okruhu stanic (0 = u stanic se domy nepenalizují)
     pen_budovy: float = 10.0            # násobek hustoty budov (samoty, chaty)
     pen_teren_sklon: float = 1.5        # strmý terén vůči max. sklonu trati
     pen_teren_relief: float = 2.0       # lokální převýšení v okně 600 m
@@ -220,6 +221,8 @@ class Koeficienty:
 
     # tunel pod městem: kolik „jednotek“ stojí 1 m tunelu navíc oproti povrchové trati (nastaví se z cen)
     tunel_ekvivalent: float = 0.0       # 0 = automaticky z cen (tunel ÷ trať v úrovni terénu)
+    demolice_nasobek: float = 3.0           # zpřesnění osy: váha demolice (× společenská cena domu) při odtlačování osy od budov
+    demolice_polomer_m: float = 15.0        # budova do této vzdálenosti od osy se při zpřesnění osy počítá jako zasažená
     tunel_min_sirka_mesta_m: float = 800.0  # užší zástavba se neobtunelovává (rampy při sklonu nevyjdou)
 
 
@@ -311,6 +314,7 @@ class Vypocet:
     demo: bool = False                 # syntetický terén bez stahování dat
     stahovat_budovy: bool = False      # budovy v celé oblasti (velmi pomalé); jinak jen v pásu kolem trasy
     chranena_uzemi: bool = True        # stahovat chráněná území
+    zpresneni_osy: bool = True         # po vložení oblouků odtlačit osu od budov (lokální posun vrcholů)
     zdroj_dat: str = "auto"            # auto = Overpass → Overture Maps; overpass; overture
     vlastni_dem: str = ""              # cesta k vlastnímu GeoTIFF (např. DMR 5G), jinak Copernicus
     okraj_km: float = 5.0              # okraj oblasti kolem elipsy přípustných tras

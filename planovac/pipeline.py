@@ -9,6 +9,8 @@ from typing import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import shapely
+from scipy.spatial import cKDTree
 from shapely.geometry import LineString
 from shapely.ops import unary_union
 
@@ -120,6 +122,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     je_stanice = [b.je_stanice for b in body]
     stanice_xy = [p for p, js in zip(body_xy, je_stanice) if js]
     varovani: list[str] = []
+    zpresneni_zprava: list[str] = []
 
     # ------------------------------------------------------------ oblast
     ratio = 1 + nav.max_prodlouzeni_pct / 100.0
@@ -291,6 +294,44 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
                                     data=dict(z_ter=z_ter, z_rail=z_rail, an=an, rozp=rozp, jizda=jizda,
                                               cena_m=cena_m, soubeh=soubeh_mod.useky(s, zel, sil), sleva=sleva))
 
+        def objektiv_pro(cs_, kor_, r_dem=None):
+            """Cíl zpřesnění osy: náklady podél osy (nákladová mapa) + pokuta za každou budovu blíž než r od osy."""
+            k = project.koef
+            r_dem = r_dem or k.demolice_polomer_m
+            mil_na_bunku = max((project.ceny.trat_zaklad_mil_km + project.ceny.technologie_mil_km) / 1000.0 * res, 1e-3)
+            P = ((project.ceny.demolice_mil_budova + project.vahy.penalizace_demolice_mil * project.vahy.budovy)
+                 * k.demolice_nasobek / mil_na_bunku)
+            B = osm.budovy
+            if len(B):
+                pas = unary_union([LineString(c.xy) for c in kor_]).buffer(600)
+                B = B[shapely.contains_xy(pas, B[:, 0], B[:, 1])]
+            strom_b = cKDTree(B) if len(B) else None
+            cost_ = cs_.cost
+            nr, nc = cost_.shape
+
+            def f(xy):
+                d = np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))
+                ds_ = np.r_[d, d[-1:]]
+                rr, cc = grid.rowcol(xy[:, 0], xy[:, 1])
+                rr, cc = np.clip(rr, 0, nr - 1), np.clip(cc, 0, nc - 1)
+                celkem = float((cost_[rr, cc] * ds_).sum() / res)
+                if strom_b is not None:
+                    dist, _ = cKDTree(xy).query(B, distance_upper_bound=r_dem)
+                    celkem += P * int(np.isfinite(dist).sum())
+                return celkem
+
+            def vhodne(i, a, p, b):
+                if strom_b is None:
+                    return False
+                t = np.linspace(0, 1, 7)[:, None]
+                pts = np.vstack([a + t * (p - a), p + t * (b - p)])
+                dist, _ = strom_b.query(pts, distance_upper_bound=80.0)
+                return bool(np.isfinite(dist).any())
+
+            return f, vhodne
+
+        zpresnit = vyp.zpresneni_osy and len(osm.budovy) > 0
+
         prog(0.7, "Optimalizuji niveletu (výškové řešení) …")
         var_a_ev = vyhodnot(osa_a)
         porovnani_var = [("Obchvat měst (základní)", var_a_ev)]
@@ -302,6 +343,29 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             porovnani_var.append(("Tunel pod městem", var_b_ev))
             if var_b_ev.J < var_a_ev.J - 1e-6:
                 vybrana, kor, cs, var_osa = var_b_ev, kor_b, cs_b, var_b
+        r_zpres = project.koef.demolice_polomer_m
+        if zpresnit:
+            prog(0.76, "Zpřesňuji osu kolem budov …")
+            t_z = time.time()
+            nejlepsi_z = None
+            for nas in (0.8, 1.0, 1.4):          # zkusí několik „šířek pásu“ budov; vyhraje nejlepší skutečné J
+                f_obj, f_vh = objektiv_pro(cs, kor, project.koef.demolice_polomer_m * nas)
+                osa_z = horizontal.zlepsi_osu(vybrana.osa, body_xy, f_obj, vhodne=f_vh)
+                if osa_z is vybrana.osa:
+                    continue
+                v_z = vyhodnot(osa_z)
+                if v_z.J < (nejlepsi_z[0].J if nejlepsi_z else vybrana.J) - 1e-6:
+                    nejlepsi_z = (v_z, project.koef.demolice_polomer_m * nas)
+            if nejlepsi_z is not None:
+                v_z, r_zpres = nejlepsi_z
+                zpresneni_zprava.append(
+                    f"Zpřesnění osy kolem budov: demolice {vybrana.demolice} → {v_z.demolice}, "
+                    f"cena {v_z.cena_mil - vybrana.cena_mil:+,.0f} mil. Kč, délka "
+                    f"{(v_z.osa.delka - vybrana.osa.delka):+,.0f} m ({time.time() - t_z:.0f} s) – přijato".replace(",", " "))
+                vybrana = v_z
+            else:
+                zpresneni_zprava.append("Zpřesnění osy kolem budov: nic lepšího nenalezeno.")
+            f_obj, f_vh = objektiv_pro(cs, kor, r_zpres)
         zaklad = vybrana
         varovani += var_osa
         osa = vybrana.osa
@@ -310,13 +374,19 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             prog(0.76, "Hledám místa, kde by snížená rychlost výrazně ušetřila …")
 
             def navrhni(zony, kor=kor, osa=osa):
-                return fit(kor, zony, osa.xy)
+                o = fit(kor, zony, osa.xy)
+                if zpresnit:
+                    # zkoušky úseků se sníženou rychlostí: lehčí zpřesnění (menší krok a méně průchodů), ať to netrvá věčnost
+                    o = horizontal.zlepsi_osu(o, body_xy, f_obj, vhodne=f_vh, offsets=(-120.0, -40.0, 40.0, 120.0),
+                                              sweeps=2)
+                return o
 
             var, useky_omez, protokol = omezeni.najdi_omezeni(
                 zaklad, [k.xy for k in kor], zaklad.data["cena_m"], res, nav, project.omezeni, navrhni, vyhodnot,
                 project.vahy.penalizace_demolice_mil, progress=lambda m: prog(0.8, m),
                 vlakna=n_vl, hodnota_casu_mil_min=hod_casu)
     osa = var.osa
+    protokol = zpresneni_zprava + protokol
     koridory = kor
     z_ter, z_rail, an, rozp, jizda = (var.data[k] for k in ("z_ter", "z_rail", "an", "rozp", "jizda"))
     useky_soubehu, sleva_soubehu = var.data["soubeh"], var.data["sleva"]

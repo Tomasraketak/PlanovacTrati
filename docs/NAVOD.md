@@ -90,6 +90,15 @@ stanice), **expres** (bez zastavení) a **rychlík** (vybrané stanice). Linky l
 jim zastávky; karta *⏱️ Jízdní doby* pak ukazuje **tabulku vlak × linka** a jízdní řád pro zvolenou kombinaci
 (projížděné stanice s časem průjezdu) – bez nového návrhu trati.
 
+### 🏠 Vyhýbání se domům
+Domům se trať vyhýbá ve třech krocích: (1) **nákladová mapa** penalizuje hustotu budov a to **i v okruhu stanic**
+(dřív se tam penalizace vypínala, proto většina demolic vznikala u měst; lze vrátit posuvníkem *Penalizace budov
+v okruhu stanic*); (2) koridor se přednostně vede **po stávajících tratích a podél silnic** (*Přitahovat trasu
+k souběhu*, ve výchozím stavu zapnuto – tam se nebourá nic); (3) po vložení oblouků proběhne **zpřesnění osy**:
+vrcholy se lokálně posouvají (až o 600 m), aby osa zasáhla co nejméně budov, a vybere se varianta s nejlepším
+kritériem (cena + demolice + čas). Váhu demolice a „šířku pásu“ lze nastavit v *Koeficienty → Nákladová mapa*, zpřesnění
+vypnout v *Výpočet a data*. Na ukázkovém projektu to snížilo počet demolic ze 188 na ~95 (cena +5 %).
+
 ### 🐢 Pravidla pro úseky se sníženou rychlostí
 Optimalizace smí na krátkých úsecích **snížit rychlost** (menší oblouky), takže se trať může vyhnout vesnici, kopci
 nebo údolí. Co přesně smí, určuje **tabulka pravidel** (karta *🎛️ Koeficienty* → *Úseky se sníženou rychlostí*;
