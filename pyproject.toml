@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "planovac-trati"
-version = "1.6.1"
+version = "1.6.2"
 description = "Automatický návrh osy vysokorychlostní trati nad výškovým modelem a OpenStreetMap"
 readme = "README.md"
 requires-python = ">=3.10"

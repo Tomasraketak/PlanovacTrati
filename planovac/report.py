@@ -363,7 +363,7 @@ def _cost_overlay_png(r: Result):
     dst = np.full((ht, wd), np.nan, dtype=np.float32)
     reproject(src, dst, src_transform=g.transform, src_crs="EPSG:32633", dst_transform=tr, dst_crs="EPSG:4326",
               resampling=Resampling.bilinear, dst_nodata=np.nan)
-    v = np.nan_to_num(dst, nan=0.0)
+    v = np.clip(np.nan_to_num(dst, nan=0.0), 0.0, 1.0)
     # barevná škála: průhledná -> žlutá -> červená -> fialová
     rgba = np.zeros((ht, wd, 4), dtype=np.uint8)
     rgba[..., 0] = np.clip(255 * np.minimum(1, v * 2.2), 0, 255)
@@ -372,10 +372,12 @@ def _cost_overlay_png(r: Result):
     rgba[..., 3] = np.clip(230 * np.minimum(1, v * 1.6), 0, 230)
     rgba[~np.isfinite(dst)] = 0
     img = Image.fromarray(rgba, "RGBA")
-    if max(img.size) > 1600:
-        img.thumbnail((1600, 1600))
+    if max(img.size) > 1000:
+        img.thumbnail((1000, 1000))
+    # paletový PNG s průhledností: ~10× menší než RGBA (nákladová mapa u 20 m jinak mívala přes 4 MB)
+    img = img.quantize(colors=64, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    img.save(buf, format="PNG", optimize=True)
     west, north = tr.c, tr.f
     east = west + tr.a * wd
     south = north + tr.e * ht

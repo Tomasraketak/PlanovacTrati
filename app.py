@@ -93,6 +93,16 @@ def w(obj, attr, label, kind="number", **kw):
 
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _verze_gitu() -> str:
+    return aktualizace.verze_gitu()          # spouští git – nesmí běžet při každém kliku
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cache_mb() -> float:
+    return aktualizace.velikost_cache_mb()   # prochází celou cache na disku
+
+
 def odhad_rastru(P: Project) -> str:
     """Odhad velikosti rastru a paměti podle zadaných bodů a rozlišení."""
     try:
@@ -249,7 +259,7 @@ with st.sidebar:
     st.caption(odhad_rastru(P))
 
     with st.expander("⚙️ Aplikace"):
-        gv = aktualizace.verze_gitu()
+        gv = _verze_gitu()
         st.caption(f"Verze {__version__}" + (f" ({gv})" if gv else ""))
         if st.button("🔍 Zkontrolovat aktualizace", width="stretch"):
             with st.spinner("Kontaktuji GitHub …"):
@@ -278,10 +288,11 @@ with st.sidebar:
             st.warning("Program byl ukončen, toto okno můžete zavřít.")
             time.sleep(1)
             aktualizace.ukonci()
-        mb = aktualizace.velikost_cache_mb()
+        mb = _cache_mb()
         if st.button(f"🗑️ Smazat stažená data ({mb:.0f} MB)", width="stretch",
                      help="Smaže cache OSM/Overture/DEM; příští výpočet je stáhne znovu."):
             st.success(f"Uvolněno {aktualizace.smaz_cache():.0f} MB.")
+            _cache_mb.clear()
         if st.button("📂 Otevřít složku výstupů", width="stretch", help="Funguje při lokálním běhu."):
             if not aktualizace.otevri_slozku(OUTPUT_DIR):
                 st.info(f"Složka výstupů: {OUTPUT_DIR}")
@@ -453,6 +464,7 @@ if spustit:
                 t0 = time.time()
                 res = run_project(copy.deepcopy(P), cb)
                 st.session_state.vysledek = res
+                st.session_state["karta"] = "🚄 Výsledek"
                 status.update(label=f"Hotovo za {time.time() - t0:.0f} s ✅", state="complete", expanded=False)
             except Exception as e:  # zobrazit uživateli
                 import traceback
@@ -464,13 +476,30 @@ if spustit:
 
 R = st.session_state.vysledek
 
-tabs = st.tabs(["🗺️ Trasa a zastávky", "🚄 Výsledek", "📈 Profil a rychlost", "🏗️ Stavby",
-                "💰 Rozpočet", "⏱️ Jízdní doby", "🎛️ Koeficienty", "⬇️ Export", "❓ Nápověda"])
+
+def vysl_cache(klic, fn):
+    """Výsledek drahé funkce (mapa, graf) se pro daný výpočet spočítá jen jednou – rerun je pak okamžitý."""
+    c = st.session_state.setdefault("_vc", {})
+    if c.get("_id") != id(R):
+        c.clear()
+        c["_id"] = id(R)
+    if klic not in c:
+        c[klic] = fn()
+    return c[klic]
+
+# Karty se vykreslují líně (jen aktivní) – st.tabs by při každém kliku spouštěl kód všech 9 karet
+# (mapa, grafy, tabulky), rerun by trval sekundy a prvky by „blikaly“.
+KARTY = ["🗺️ Trasa a zastávky", "🚄 Výsledek", "📈 Profil a rychlost", "🏗️ Stavby",
+         "💰 Rozpočet", "⏱️ Jízdní doby", "🎛️ Koeficienty", "⬇️ Export", "❓ Nápověda"]
+if st.session_state.get("karta") not in KARTY:
+    st.session_state["karta"] = KARTY[0]
+_vyber = st.segmented_control("Karta", KARTY, key="karta", label_visibility="collapsed", width="stretch")
+karta = _vyber or KARTY[0]
 
 
 # ========================================================================= tab: zadání
 
-with tabs[0]:
+if karta == KARTY[0]:
     from planovac import body as body_mod
 
     ss = st.session_state
@@ -721,7 +750,7 @@ if R is not None:
 
     S = report.souhrn(R)
 
-with tabs[1]:
+if karta == KARTY[1]:
     if R is None:
         _no_result()
     else:
@@ -747,27 +776,32 @@ with tabs[1]:
                     f"násypy {S['nasyp_mil_m3']:.1f} / výkopy {S['vykop_mil_m3']:.1f}")
         for wmsg in R.varovani:
             st.warning(wmsg)
-        with st.spinner("Kreslím mapu …"):
-            html_mapa = report.build_map(R, fit=False).get_root().render()
+        naklad = st.checkbox("Zobrazit nákladovou mapu (načítání může chvíli trvat)", value=False, key="mapa_naklad")
+        try:
+            with st.spinner("Kreslím mapu …"):
+                html_mapa = vysl_cache(("mapa", naklad),
+                                       lambda: report.build_map(R, cost_layer=naklad, fit=False).get_root().render())
             if hasattr(st, "iframe"):
                 st.iframe(html_mapa, height=680)
             else:  # starší Streamlit
                 components.html(html_mapa, height=680)
+        except Exception as e_mapa:           # noqa: BLE001 – místo bílé obrazovky ukázat důvod
+            st.error(f"Mapu se nepodařilo vykreslit: {e_mapa}")
         st.caption(f"Výpočet trval {R.trvani_s:.0f} s · rastr {R.grid.ncols} × {R.grid.nrows} buněk po {R.grid.res:.0f} m "
                    "· v mapě lze přepínat podklady i vrstvy (vpravo nahoře), včetně nákladové mapy.")
 
-with tabs[2]:
+if karta == KARTY[2]:
     if R is None:
         _no_result()
     else:
         st.subheader("Podélný profil")
-        st.plotly_chart(report.fig_profil(R), width="stretch", key="pl_profil")
+        st.plotly_chart(vysl_cache("fig_profil", lambda: report.fig_profil(R)), width="stretch", key="pl_profil")
         st.subheader("Sklony nivelety")
-        st.plotly_chart(report.fig_sklon(R), width="stretch", key="pl_sklon")
+        st.plotly_chart(vysl_cache("fig_sklon", lambda: report.fig_sklon(R)), width="stretch", key="pl_sklon")
         st.subheader("Rychlostní profil")
-        st.plotly_chart(report.fig_rychlost(R), width="stretch", key="pl_rychlost1")
+        st.plotly_chart(vysl_cache("fig_rychlost", lambda: report.fig_rychlost(R)), width="stretch", key="pl_rychlost1")
 
-with tabs[3]:
+if karta == KARTY[3]:
     if R is None:
         _no_result()
     else:
@@ -828,7 +862,7 @@ with tabs[3]:
         st.subheader("Prodloužení úseků proti vzdušné čáře")
         st.dataframe(report.tab_prodlouzeni(R), hide_index=True, width="stretch")
 
-with tabs[4]:
+if karta == KARTY[4]:
     if R is None:
         _no_result()
     else:
@@ -884,7 +918,7 @@ def auto_sekce_gui(R, RJ, J):
     for w_ in R.auto_varovani:
         st.warning(w_)
 
-with tabs[5]:
+if karta == KARTY[5]:
     if R is None:
         _no_result()
     else:
@@ -933,10 +967,10 @@ with tabs[5]:
         st.subheader("Porovnání vlaků (všechny zastávky / bez zastavení)")
         st.dataframe(report.tab_porovnani_vlaku(R), hide_index=True, width="stretch")
 
-with tabs[6]:
+if karta == KARTY[6]:
     koeficienty_tab()
 
-with tabs[7]:
+if karta == KARTY[7]:
     if R is None:
         _no_result()
     else:
@@ -970,6 +1004,6 @@ with tabs[7]:
         st.subheader("Souhrn")
         st.code(report.souhrn_text(R), language=None)
 
-with tabs[8]:
+if karta == KARTY[8]:
     navod = ROOT / "docs" / "NAVOD.md"
     st.markdown(navod.read_text(encoding="utf-8") if navod.exists() else "Návod nenalezen (docs/NAVOD.md).")
