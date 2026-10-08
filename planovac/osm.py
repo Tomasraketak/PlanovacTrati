@@ -382,3 +382,31 @@ def geocode(text: str, limit: int = 6) -> list[dict]:
     )
     r.raise_for_status()
     return [{"nazev": d["display_name"], "lat": float(d["lat"]), "lon": float(d["lon"])} for d in r.json()]
+
+
+def nejblizsi_obec(lat: float, lon: float) -> str:
+    """Název nejbližší obce (Nominatim reverse, cache na disku). Při chybě vrací ""."""
+    key = cache_dir("osm") / "reverse.json"
+    try:
+        cache = json.loads(key.read_text(encoding="utf-8")) if key.exists() else {}
+    except Exception:
+        cache = {}
+    k = f"{lat:.3f},{lon:.3f}"
+    if k in cache:
+        return cache[k]
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/reverse",
+                         params={"lat": lat, "lon": lon, "format": "json", "zoom": 12, "accept-language": "cs"},
+                         headers={"User-Agent": USER_AGENT}, timeout=8)
+        r.raise_for_status()
+        a = r.json().get("address", {})
+        nazev = (a.get("village") or a.get("town") or a.get("city") or a.get("hamlet")
+                 or a.get("municipality") or a.get("suburb") or "")
+    except Exception:
+        return ""
+    cache[k] = nazev
+    try:
+        key.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+    return nazev

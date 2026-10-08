@@ -327,9 +327,47 @@ tabs = st.tabs(["🗺️ Trasa a zastávky", "🚄 Výsledek", "📈 Profil a ry
 # ========================================================================= tab: zadání
 
 with tabs[0]:
+    from planovac import body as body_mod
+
+    ss = st.session_state
+    ss.setdefault("rezim", "🚉 Stanice")
+    ss.setdefault("vybrany", None)
+    ss.setdefault("historie", [])
+    ss.setdefault("presun", False)
+    ss.setdefault("klik_id", None)
+    ss.setdefault("objekt_id", None)
+
+    def zmen_body(nove, vybrany=None):
+        """Uloží změnu bodů (s historií pro „Zpět“) a překreslí."""
+        ss.historie = (ss.historie + [copy.deepcopy(P.body)])[-30:]
+        P.body = nove
+        ss.vybrany = vybrany
+        ss.body_ver += 1
+        st.rerun()
+
     left, right = st.columns([3, 2], gap="medium")
     with left:
-        st.markdown("**Klikněte do mapy** na místo nové stanice nebo průjezdního bodu.")
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            rezim = st.segmented_control(
+                "Klik do mapy", ["🚉 Stanice", "◆ Průjezdní bod", "✋ Vybrat bod"], default=ss.rezim,
+                key=f"rezim_{ss.body_ver}", help="🚉 přidá stanici (vlak zastaví) · ◆ přidá průjezdní bod "
+                "(trať jím povede, vlak nezastaví) · ✋ klikem na značku bod vyberete a upravíte")
+            ss.rezim = rezim or ss.rezim
+        with c2:
+            if st.button("↩️ Zpět", width="stretch", disabled=not ss.historie, help="Vrátit poslední změnu bodů"):
+                P.body = ss.historie.pop()
+                ss.vybrany = None
+                ss.body_ver += 1
+                st.rerun()
+        if ss.presun and ss.vybrany is not None:
+            st.info(f"📍 Klikněte do mapy na nové místo pro bod **{P.body[ss.vybrany].nazev}**.")
+        elif ss.rezim.startswith("✋"):
+            st.caption("Klikněte na značku bodu v mapě – vpravo se ukáže, co s ním jde udělat.")
+        else:
+            st.caption("Každý klik do mapy přidá bod. Program ho sám zařadí do pořadí tam, kde nejméně "
+                       "prodlouží trasu, a pojmenuje podle nejbližší obce.")
+
         if P.body:
             center = [float(np.mean([b.lat for b in P.body])), float(np.mean([b.lon for b in P.body]))]
         else:
@@ -346,42 +384,89 @@ with tabs[0]:
             folium.PolyLine(xy_array_to_latlon(R.osa.xy[::5]), color="#c0392b", weight=4,
                             tooltip="navržená trať").add_to(m)
         for i, b in enumerate(P.body, 1):
-            color = "#1e3c72" if b.je_stanice else "#f39c12"
-            folium.Marker([b.lat, b.lon], tooltip=f"{i}. {b.nazev} ({b.typ})", icon=folium.DivIcon(
-                html=f'<div style="background:{color};color:#fff;border:2px solid #fff;border-radius:50%;width:26px;'
-                     f'height:26px;line-height:22px;text-align:center;font:700 13px system-ui;box-shadow:0 1px 4px '
-                     f'rgba(0,0,0,.5);transform:translate(-13px,-13px)">{i}</div>')).add_to(m)
-        if st.session_state.posledni_klik:
-            folium.CircleMarker(st.session_state.posledni_klik, radius=8, color="#e74c3c", fill=True).add_to(m)
+            vybran = ss.vybrany == i - 1
+            okraj = "#e74c3c" if vybran else "#fff"
+            vel = 32 if vybran else 26
+            if b.je_stanice:
+                tvar = (f"background:#1e3c72;border-radius:50%;width:{vel}px;height:{vel}px;"
+                        f"line-height:{vel - 4}px")
+                obsah = str(i)
+            else:
+                tvar = (f"background:#f39c12;width:{vel - 4}px;height:{vel - 4}px;transform:rotate(45deg);"
+                        f"line-height:{vel - 8}px")
+                obsah = f'<span style="display:inline-block;transform:rotate(-45deg)">{i}</span>'
+            folium.Marker([b.lat, b.lon], tooltip=f"{i}. {b.nazev} – {b.typ}", icon=folium.DivIcon(
+                icon_size=(vel, vel), icon_anchor=(vel // 2, vel // 2),
+                html=f'<div style="{tvar};color:#fff;border:3px solid {okraj};text-align:center;'
+                     f'font:700 13px system-ui;box-shadow:0 1px 5px rgba(0,0,0,.55);cursor:pointer">{obsah}</div>'
+            )).add_to(m)
         folium.LayerControl(collapsed=True).add_to(m)
         if len(P.body) >= 2:
             m.fit_bounds([[min(b.lat for b in P.body), min(b.lon for b in P.body)],
-                          [max(b.lat for b in P.body), max(b.lon for b in P.body)]], padding=(30, 30))
-        out = st_folium(m, height=560, use_container_width=True, returned_objects=["last_clicked"],
-                        key=f"mapa_vstup_{st.session_state.body_ver}")
-        if out and out.get("last_clicked"):
-            lc = out["last_clicked"]
-            klik = [round(lc["lat"], 5), round(lc["lng"], 5)]
-            if klik != st.session_state.posledni_klik:
-                st.session_state.posledni_klik = klik
+                          [max(b.lat for b in P.body), max(b.lon for b in P.body)]], padding=(40, 40))
+        out = st_folium(m, height=560, use_container_width=True,
+                        returned_objects=["last_clicked", "last_object_clicked"],
+                        key=f"mapa_vstup_{ss.body_ver}")
+        st.markdown('<span class="small-note">🔵 stanice (vlak zastaví) · 🔶 průjezdní bod (trať vede přes '
+                    'bod, vlak nezastaví) · čárkovaně spojnice v pořadí jízdy · červeně navržená trať</span>',
+                    unsafe_allow_html=True)
+
+        out = out or {}
+        objekt = out.get("last_object_clicked")
+        klik = out.get("last_clicked")
+        oid = (round(objekt["lat"], 6), round(objekt["lng"], 6)) if objekt else None
+        kid = (round(klik["lat"], 6), round(klik["lng"], 6)) if klik else None
+        if oid and oid != ss.objekt_id:
+            ss.objekt_id = oid
+            i = body_mod.nejblizsi_bod(P.body, *oid, max_m=1500)
+            if i is not None:
+                ss.vybrany, ss.presun = i, False
+                ss.rezim = "✋ Vybrat bod"
+                ss.body_ver += 1
                 st.rerun()
+        elif kid and kid != ss.klik_id:
+            ss.klik_id = kid
+            lat, lon = kid
+            if ss.presun and ss.vybrany is not None:
+                nove = list(P.body)
+                b = nove[ss.vybrany]
+                nove[ss.vybrany] = Bod(b.nazev, round(lat, 5), round(lon, 5), b.typ)
+                ss.presun = False
+                zmen_body(nove, ss.vybrany)
+            elif not ss.rezim.startswith("✋"):
+                typ = TYP_STANICE if ss.rezim.startswith("🚉") else TYP_PRUJEZD
+                from planovac.osm import nejblizsi_obec
+
+                with st.spinner("Přidávám bod …"):
+                    obec = nejblizsi_obec(lat, lon)
+                nove, i = body_mod.pridej(P.body, lat, lon, typ, obec=obec)
+                zmen_body(nove, i)
 
     with right:
-        if st.session_state.posledni_klik:
-            lat, lon = st.session_state.posledni_klik
+        if ss.vybrany is not None and ss.vybrany < len(P.body):
+            i = ss.vybrany
+            b = P.body[i]
             with st.container(border=True):
-                st.markdown(f"📍 **Vybrané místo:** {lat:.5f}, {lon:.5f}")
-                c1, c2 = st.columns(2)
-                nazev = c1.text_input("Název", value=f"Bod {len(P.body) + 1}", key="novy_nazev")
-                typ = c2.selectbox("Typ", TYPY_BODU, key="novy_typ")
-                moznosti = ["na konec"] + [f"před {i + 1}. {b.nazev}" for i, b in enumerate(P.body)]
-                kam = st.selectbox("Vložit", moznosti, index=max(len(moznosti) - 1, 0) if len(P.body) >= 2 else 0,
-                                   key="novy_kam")
-                if st.button("➕ Přidat bod", type="primary", width="stretch"):
-                    pos = len(P.body) if kam == "na konec" else moznosti.index(kam) - 1
-                    P.body.insert(pos, Bod(nazev, lat, lon, typ))
-                    st.session_state.posledni_klik = None
-                    st.session_state.body_ver += 1
+                st.markdown(f"**{'🚉' if b.je_stanice else '🔶'} Vybraný bod {i + 1}:** {b.lat:.5f}, {b.lon:.5f}")
+                novy_nazev = st.text_input("Název", b.nazev, key=f"vyb_nazev_{ss.body_ver}")
+                if novy_nazev != b.nazev:
+                    P.body[i] = Bod(novy_nazev, b.lat, b.lon, b.typ)
+                c = st.columns(3)
+                if c[0].button("🔶 Na průjezdní" if b.je_stanice else "🚉 Na stanici", width="stretch"):
+                    zmen_body(body_mod.prepni_typ(P.body, i), i)
+                if c[1].button("📍 Přesunout", width="stretch", help="Další klik do mapy bod přesune"):
+                    ss.presun = True
+                    st.rerun()
+                if c[2].button("🗑️ Smazat", width="stretch"):
+                    zmen_body(body_mod.smaz(P.body, i), None)
+                c = st.columns(3)
+                if c[0].button("⬆️ Dřív", width="stretch", disabled=i == 0):
+                    zmen_body(*body_mod.posun(P.body, i, -1))
+                if c[1].button("⬇️ Později", width="stretch", disabled=i >= len(P.body) - 1):
+                    zmen_body(*body_mod.posun(P.body, i, +1))
+                if c[2].button("✖ Zrušit výběr", width="stretch"):
+                    ss.vybrany, ss.presun = None, False
+                    ss.body_ver += 1
                     st.rerun()
 
         with st.container(border=True):
@@ -392,18 +477,22 @@ with tabs[0]:
                 try:
                     from planovac.osm import geocode
 
-                    st.session_state.hledani = geocode(dotaz)
-                    if not st.session_state.hledani:
+                    ss.hledani = geocode(dotaz)
+                    if not ss.hledani:
                         st.warning("Nic nenalezeno.")
                 except Exception as e:
                     st.error(f"Vyhledávání selhalo: {e}")
-            if st.session_state.hledani:
-                vysl = st.selectbox("Výsledky", st.session_state.hledani, format_func=lambda d: d["nazev"][:90])
-                if st.button("📍 Označit v mapě", width="stretch"):
-                    st.session_state.posledni_klik = [round(vysl["lat"], 5), round(vysl["lon"], 5)]
-                    st.session_state.hledani = []
-                    st.session_state.body_ver += 1
-                    st.rerun()
+            if ss.hledani:
+                vysl = st.selectbox("Výsledky", ss.hledani, format_func=lambda d: d["nazev"][:90])
+                c1, c2 = st.columns(2)
+                for col, typ, popis in ((c1, TYP_STANICE, "🚉 Přidat jako stanici"),
+                                        (c2, TYP_PRUJEZD, "🔶 Jako průjezdní bod")):
+                    if col.button(popis, width="stretch", key=f"hl_{typ}"):
+                        nazev = vysl["nazev"].split(",")[0]
+                        nove, i = body_mod.pridej(P.body, vysl["lat"], vysl["lon"], typ,
+                                                  nazev=nazev if typ == TYP_STANICE else None, obec=nazev)
+                        ss.hledani = []
+                        zmen_body(nove, i)
 
         st.markdown("**Body trasy** (v pořadí jízdy; lze přímo editovat, mazat i přidávat řádky)")
         df = pd.DataFrame([{"Název": b.nazev, "Typ": b.typ, "Šířka (lat)": b.lat, "Délka (lon)": b.lon}
@@ -424,22 +513,14 @@ with tabs[0]:
             nove.append(Bod(str(row["Název"] or "Bod"), float(row["Šířka (lat)"]), float(row["Délka (lon)"]),
                             row["Typ"] if row["Typ"] in TYPY_BODU else TYP_STANICE))
         if nove != P.body:
+            ss.historie = (ss.historie + [copy.deepcopy(P.body)])[-30:]
             P.body = nove
 
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         if c1.button("⇅ Obrátit směr", width="stretch", disabled=len(P.body) < 2):
-            P.body.reverse()
-            st.session_state.body_ver += 1
-            st.rerun()
-        if c2.button("↕ Poslední výš", width="stretch", disabled=len(P.body) < 3,
-                     help="Přesune poslední bod o jedno místo dopředu"):
-            P.body.insert(len(P.body) - 2, P.body.pop())
-            st.session_state.body_ver += 1
-            st.rerun()
-        if c3.button("🗑️ Smazat vše", width="stretch", disabled=not P.body):
-            P.body = []
-            st.session_state.body_ver += 1
-            st.rerun()
+            zmen_body(list(reversed(P.body)))
+        if c2.button("🗑️ Smazat vše", width="stretch", disabled=not P.body):
+            zmen_body([])
 
         if len(P.body) >= 2:
             xy = [to_xy(b.lon, b.lat) for b in P.body]
@@ -555,19 +636,19 @@ with tabs[3]:
         with c1:
             st.subheader("Křížení")
             st.dataframe(report.tab_krizeni(R), hide_index=True, width="stretch", height=300)
-            st.subheader("Směrové oblouky")
-            st.dataframe(report.tab_oblouky(R), hide_index=True, width="stretch", height=300)
         with c2:
             st.subheader("Obce v blízkosti trati (bez zastávky)")
             st.dataframe(report.tab_obce(R), hide_index=True, width="stretch", height=300)
-            st.subheader("Chráněná území")
-            df_ch = report.tab_chranena(R)
-            if len(df_ch):
-                st.dataframe(df_ch, hide_index=True, width="stretch")
-            else:
-                st.write("Trať neprotíná chráněná území.")
-            st.subheader("Prodloužení úseků")
-            st.dataframe(report.tab_prodlouzeni(R), hide_index=True, width="stretch")
+        st.subheader("Chráněná území")
+        df_ch = report.tab_chranena(R)
+        if len(df_ch):
+            st.dataframe(df_ch, hide_index=True, width="stretch")
+        else:
+            st.write("Trať neprotíná chráněná území.")
+        st.subheader("Směrové oblouky")
+        st.dataframe(report.tab_oblouky(R), hide_index=True, width="stretch", height=300)
+        st.subheader("Prodloužení úseků proti vzdušné čáře")
+        st.dataframe(report.tab_prodlouzeni(R), hide_index=True, width="stretch")
 
 with tabs[4]:
     if R is None:
@@ -609,15 +690,20 @@ with tabs[5]:
         metric(c[0], "Celková jízdní doba", fmt_cas(J.celkem_s))
         metric(c[1], "Zastavení", f"{sum(1 for x in J.jizdni_rad[1:-1] if x[3])}")
         metric(c[2], "Průměrná rychlost", f"{R.delka_m / 1000 / max(J.celkem_s / 3600, 1e-9):.0f} km/h")
-        c1, c2 = st.columns(2)
         RJ = copy.copy(R)
         RJ.jizda = J
-        with c1:
-            st.subheader("Jízdní řád")
-            st.dataframe(report.tab_jizdni_rad(RJ), hide_index=True, width="stretch")
-        with c2:
-            st.subheader("Úseky mezi zastaveními")
-            st.dataframe(report.tab_useky_jizdy(RJ), hide_index=True, width="stretch")
+        st.subheader("Jízdní řád")
+        st.dataframe(report.tab_jizdni_rad(RJ), hide_index=True, width="stretch")
+        st.subheader("Úseky mezi zastaveními")
+        st.dataframe(
+            report.tab_useky_jizdy(RJ), hide_index=True, width="stretch",
+            column_config={
+                "Délka [km]": st.column_config.NumberColumn("Délka", format="%.1f km"),
+                "Jízdní doba": st.column_config.TextColumn("Jízdní doba"),
+                "Průměrná rychlost [km/h]": st.column_config.NumberColumn(
+                    "Ø rychlost", format="%d km/h",
+                    help="Délka úseku / jízdní doba (vč. rozjezdu, brzdění a provozní rezervy)"),
+            })
         st.plotly_chart(report.fig_rychlost(R, J), width="stretch", key="pl_rychlost2")
         st.caption(f"Jízdní doby obsahují přirážku {R.project.vlak.rezerva_pct:.0f} % a pobyt v každé zastávce "
                    f"{R.project.vlak.pobyt_stanice_s:.0f} s. Žluté pásy = úseky se sníženou rychlostí.")

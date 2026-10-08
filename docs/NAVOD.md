@@ -2,7 +2,8 @@
 
 ## Rychlý start (3 kroky)
 
-1. **Zadejte body trasy** na kartě *🗺️ Trasa a zastávky* – klikněte do mapy, vyplňte název, zvolte typ
+1. **Naklikejte body trasy** na kartě *🗺️ Trasa a zastávky* – nad mapou zvolte režim **🚉 Stanice** nebo
+   **◆ Průjezdní bod** a klikejte do mapy. Každý klik rovnou přidá bod, sám ho zařadí do pořadí a pojmenuje.
    a stiskněte **➕ Přidat bod**. Nebo použijte hledání podle názvu, případně upravte tabulku přímo.
 2. **Nastavte parametry** v levém panelu – rychlost, max. sklon, max. prodloužení a priority.
 3. Stiskněte **🚀 Navrhnout trať**. Průběh uvidíte nahoře; výsledky najdete na dalších kartách.
@@ -14,13 +15,18 @@
 
 | Typ | Význam |
 |---|---|
-| 🚉 **stanice** | vlak zde zastavuje; trať je zde přímá a vodorovná v délce nástupiště; zástavba v okolí (výchozí 2 km) se nepenalizuje, takže trať může vést do města |
-| ◆ **průjezdní bod** | trasa musí projít tímto místem (např. koridor podél dálnice, překonání údolí na určitém místě), vlak nezastavuje |
+| 🔵 **stanice** | vlak zde zastavuje; trať je zde přímá a vodorovná v délce nástupiště; zástavba v okolí (výchozí 2 km) se nepenalizuje, takže trať může vést do města |
+| 🔶 **průjezdní bod** | trasa musí projít tímto místem (např. koridor podél dálnice, překonání údolí na určitém místě, obejití obce zvolenou stranou), vlak nezastavuje |
 
-- Pořadí bodů = pořadí jízdy. První a poslední bod musí být stanice.
-- Řádky v tabulce lze mazat (zaškrtnout vlevo a klávesa Delete / ikona koše) i přidávat (řádek dole).
-- **⇅ Obrátit směr** otočí celou trasu. **↕ Posunout poslední výš** pomůže, když nově přidaný bod patří doprostřed.
-- Při přidávání bodu z mapy lze rovnou vybrat, *před který bod* se má vložit.
+### Klikání do mapy
+- **Režim nad mapou**: *🚉 Stanice* / *◆ Průjezdní bod* – každý klik do mapy přidá bod daného typu.
+  Program ho **sám vloží do pořadí** tam, kde nejméně prodlouží trasu (průjezdní bod mezi Třeboní a
+  Jindřichovým Hradcem se tedy zařadí mezi ně), a **pojmenuje ho podle nejbližší obce**.
+- **✋ Vybrat bod** (nebo kdykoli klik na značku): vpravo se ukáže panel – přejmenovat, přepnout stanice ↔
+  průjezdní bod, **📍 Přesunout** (další klik do mapy bod přesune), **⬆️/⬇️** změnit pořadí, **🗑️ Smazat**.
+- **↩️ Zpět** vrátí poslední změnu bodů.
+- Body lze přidat i z **vyhledávání podle názvu** (tlačítka „Přidat jako stanici / jako průjezdní bod“) nebo
+  upravit přímo v tabulce pod mapou. První a poslední bod musí být stanice.
 
 ## Parametry
 

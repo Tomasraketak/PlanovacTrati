@@ -93,7 +93,8 @@ cd planovactrati
 
 1. Vlevo v **📁 Projekt** vyberte `cb_jh_jihlava` (přednastaveno) nebo `demo` (bez internetu, hotovo za pár
    sekund) a klikněte **Načíst projekt**.
-2. Na kartě **🗺️ Trasa a zastávky** klikáním do mapy přidávejte **stanice** (vlak zastavuje, trať smí do města)
+2. Na kartě **🗺️ Trasa a zastávky** zvolte režim a klikáním do mapy přidávejte **stanice** (vlak zastavuje, trať smí do města)
+   a **průjezdní body** (trať jimi povede, vlak nezastaví) – program je sám zařadí do pořadí a pojmenuje
    a **průjezdní body** (trasa tudy musí vést). Body lze i vyhledat podle názvu nebo upravit v tabulce.
 3. Vlevo nastavte **rychlost, max. sklon, max. prodloužení proti vzdušné čáře**, priority a ceny.
 4. Klikněte **🚀 Navrhnout trať**. První výpočet v nové oblasti stahuje data (výškový model ~40 MB na
