@@ -8,3 +8,6 @@ vystupy/
 *.part
 .DS_Store
 Thumbs.db
+static/
+data/gui_*.log
+data/nastaveni.json

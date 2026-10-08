@@ -7,3 +7,4 @@ gatherUsageStats = false
 
 [server]
 maxUploadSize = 50
+enableStaticServing = true

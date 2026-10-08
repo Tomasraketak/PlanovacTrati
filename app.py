@@ -18,13 +18,28 @@ import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_folium import st_folium
 
-from planovac import __version__, aktualizace
+from planovac import __version__, aktualizace, diagnostika
 from planovac.config import TYP_PRUJEZD, TYP_STANICE, TYP_ZASTAVKA, TYPY_BODU, VLAK_VLASTNI, VLAKY, Bod, Linka, Project
 from planovac.geo import to_xy
 from planovac.paths import OUTPUT_DIR, PROJECTS_DIR, ROOT
 
 st.set_page_config(page_title="Plánovač tratí", page_icon="🚄", layout="wide",
                    menu_items={"About": f"Plánovač tratí {__version__} – návrh osy VRT nad výškovým modelem a OSM."})
+
+diagnostika.zapni_faulthandler()
+
+
+@st.cache_resource(show_spinner=False)
+def _log_port():
+    return diagnostika.spust_server()
+
+
+_port = _log_port()
+if _port:      # skrytý skript: chyby prohlížeče (např. bílá obrazovka) se zapíšou do data/gui_chyby.log
+    if hasattr(st, "iframe"):
+        st.iframe(diagnostika.skript(_port), height=1)
+    else:  # starší Streamlit
+        components.html(diagnostika.skript(_port), height=0)
 
 CSS = """
 <style>
@@ -293,6 +308,13 @@ with st.sidebar:
                      help="Smaže cache OSM/Overture/DEM; příští výpočet je stáhne znovu."):
             st.success(f"Uvolněno {aktualizace.smaz_cache():.0f} MB.")
             _cache_mb.clear()
+        with st.expander("🩺 Diagnostika"):
+            i = diagnostika.info()
+            st.caption(f"Python {i['python']} · Streamlit {i['streamlit']} · {i['os']}")
+            chyby = diagnostika.posledni_chyby()
+            st.code(chyby or "Žádné zaznamenané chyby.", language="text")
+            st.download_button("⬇️ Stáhnout diagnostiku (.zip)", diagnostika.zip_diagnostiky(), "diagnostika.zip",
+                               width="stretch", help="Pošlete při hlášení problému (bílá obrazovka apod.).")
         if st.button("📂 Otevřít složku výstupů", width="stretch", help="Funguje při lokálním běhu."):
             if not aktualizace.otevri_slozku(OUTPUT_DIR):
                 st.info(f"Složka výstupů: {OUTPUT_DIR}")
@@ -470,11 +492,33 @@ if spustit:
                 import traceback
 
                 traceback.print_exc()          # do konzole/logu (v GUI je výjimka jen sbalená ve stavu)
+                diagnostika.zapis_vyjimku("výpočet trati")
                 status.update(label="Výpočet selhal ❌", state="error")
                 st.exception(e)
         bar.empty()
 
 R = st.session_state.vysledek
+
+
+def mapa_do_souboru(html: str) -> str | None:
+    """Uloží HTML mapy do ``static/`` (UTF-8!) a vrátí URL, ze které ji načte iframe; None = nepodařilo se."""
+    import hashlib
+
+    try:
+        d = ROOT / "static"
+        d.mkdir(exist_ok=True)
+        f = d / f"mapa_{hashlib.sha1(html.encode('utf-8')).hexdigest()[:12]}.html"
+        if not f.exists():
+            for stara in d.glob("mapa_*.html"):
+                try:
+                    stara.unlink()
+                except OSError:
+                    pass
+            f.write_text(html, encoding="utf-8")
+        return f"/app/static/{f.name}"
+    except Exception:                                      # noqa: BLE001
+        diagnostika.zapis_vyjimku("zápis mapy do static/")
+        return None
 
 
 def vysl_cache(klic, fn):
@@ -748,7 +792,11 @@ if R is not None:
     from planovac import report
     from planovac.traction import fmt_cas
 
-    S = report.souhrn(R)
+    try:
+        S = report.souhrn(R)
+    except Exception:                                      # noqa: BLE001
+        diagnostika.zapis_vyjimku("souhrn výsledku")
+        raise
 
 if karta == KARTY[1]:
     if R is None:
@@ -774,18 +822,25 @@ if karta == KARTY[1]:
         metric(c[2], "Demolice budov", f"{S['demolice']}", f"{S['hluk_budovy']} budov do 100 m")
         metric(c[3], "Zemní práce", f"{S['nasyp_mil_m3'] + S['vykop_mil_m3']:.1f} mil. m³",
                     f"násypy {S['nasyp_mil_m3']:.1f} / výkopy {S['vykop_mil_m3']:.1f}")
-        for wmsg in R.varovani:
-            st.warning(wmsg)
+        if R.varovani:
+            with st.expander(f"⚠️ Upozornění k výpočtu ({len(R.varovani)})", expanded=len(R.varovani) <= 3):
+                for wmsg in R.varovani:
+                    st.warning(wmsg)
         naklad = st.checkbox("Zobrazit nákladovou mapu (načítání může chvíli trvat)", value=False, key="mapa_naklad")
         try:
             with st.spinner("Kreslím mapu …"):
                 html_mapa = vysl_cache(("mapa", naklad),
                                        lambda: report.build_map(R, cost_layer=naklad, fit=False).get_root().render())
-            if hasattr(st, "iframe"):
+                url_mapy = vysl_cache(("mapa_url", naklad), lambda: mapa_do_souboru(html_mapa))
+            if url_mapy and hasattr(st, "iframe"):
+                st.iframe(url_mapy, height=680)          # načte se ze serveru, ne přes websocket
+                st.markdown(f"[↗ Otevřít mapu v novém okně]({url_mapy})")
+            elif hasattr(st, "iframe"):
                 st.iframe(html_mapa, height=680)
             else:  # starší Streamlit
                 components.html(html_mapa, height=680)
         except Exception as e_mapa:           # noqa: BLE001 – místo bílé obrazovky ukázat důvod
+            diagnostika.zapis_vyjimku("mapa výsledku")
             st.error(f"Mapu se nepodařilo vykreslit: {e_mapa}")
         st.caption(f"Výpočet trval {R.trvani_s:.0f} s · rastr {R.grid.ncols} × {R.grid.nrows} buněk po {R.grid.res:.0f} m "
                    "· v mapě lze přepínat podklady i vrstvy (vpravo nahoře), včetně nákladové mapy.")

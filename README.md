@@ -79,6 +79,15 @@ py -3 -m venv .venv
   jízdní dobu i nejmenší poloměr oblouků v úseku.
 - **Vlak × auto** – porovnání jízdních dob vlaku a auta mezi stanicemi (Mapy.cz API s klíčem, jinak OSRM).
 
+## 🩺 Když se něco pokazí (např. bílá obrazovka)
+
+- Otevřete v levém panelu **⚙️ Aplikace → 🩺 Diagnostika** (pokud se aplikace načte): ukáže poslední chyby (včetně chyb
+  prohlížeče) a umožní stáhnout `diagnostika.zip` k odeslání. Chyby se ukládají do `data/gui_chyby.log`.
+- Při bílé obrazovce stiskněte **F5**; chyba bude v logu. Případně `F12` → záložka *Console* → zkopírujte červený text.
+- **Program neinstalujte do složky synchronizované OneDrivem** (`Desktop`, `Dokumenty`): synchronizace zpomaluje
+  `.venv` a `data/cache` a může soubory zamykat. Doporučeno `C:\PlanovacTrati` (to dělá `start.ps1` sám,
+  výchozí složka `%USERPROFILE%\PlanovacTrati` je mimo OneDrive).
+
 ## 🧭 Jak se to používá
 
 1. Vlevo v **📁 Projekt** vyberte `cb_jh_jihlava` (přednastaveno) nebo `demo` (bez internetu, hotovo za pár
