@@ -119,3 +119,23 @@ def test_tab_auto_rozdily():
     assert list(t["Z"]) == ["A", "B", "CELKEM"]
     assert t.iloc[0]["Rozdíl [min]"] == 25.0 and t.iloc[2]["Rozdíl [min]"] == 50.0
     assert report.cas_min("1:20:30") == pytest.approx(80.5)
+
+
+def test_klic_trvale_a_migrace(tmp_path, monkeypatch):
+    cfg = tmp_path / "cfg"
+    monkeypatch.setenv("PLANOVAC_CONFIG_DIR", str(cfg))
+    assert auto.nacti_klic() == ""
+    # starý soubor v data/ se přestěhuje
+    (tmp_path / "nastaveni.json").write_text('{"mapy_klic": "stary"}')
+    assert auto.nacti_klic() == "stary"
+    assert (cfg / "nastaveni.json").exists()
+    auto.uloz_klic("novy")
+    assert auto.nacti_klic() == "novy"
+    # po „aktualizaci“ (nová složka dat) klíč zůstane
+    monkeypatch.setenv("PLANOVAC_DATA", str(tmp_path / "jina"))
+    assert auto.nacti_klic() == "novy"
+    monkeypatch.setenv("MAPY_API_KEY", "env")
+    assert auto.nacti_klic() == "env"
+    monkeypatch.delenv("MAPY_API_KEY")
+    auto.uloz_klic("")
+    assert auto.nacti_klic() == ""

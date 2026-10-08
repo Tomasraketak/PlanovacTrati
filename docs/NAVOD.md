@@ -109,7 +109,7 @@ změně pořadí bodů se přesouvá s ním.
 Na kartě *⏱️ Jízdní doby* tlačítko **🚗 Načíst** zjistí dobu jízdy autem mezi stanicemi a porovná ji s vlakem
 (zvolený vlak a linka): vzdálenost po trati a po silnici, časy, rozdíl v minutách, poměr a průměrné rychlosti,
 včetně řádku CELKEM a grafu. Zdroj: **Mapy.cz** routing API (API klíč zdarma na <https://developer.mapy.com>,
-zadejte v poli *Mapy.cz API klíč* – uloží se jen lokálně, nebo proměnná prostředí `MAPY_API_KEY`); bez klíče nebo při
+zadejte v poli *Mapy.cz API klíč* – uloží se trvale jen na vašem počítači (`~/.planovac/nastaveni.json`, tj. `%USERPROFILE%\\.planovac`), přežije aktualizaci a nepřidává se do repozitáře; nebo proměnná prostředí `MAPY_API_KEY`); bez klíče nebo při
 chybě se použije **OSRM** (veřejné, bez dopravní situace). Z příkazové řádky: `planovac.bat run projekt.yaml --auto`.
 Časy autem jsou orientační (bez zácp, semaforů mimo to, co ví služba).
 

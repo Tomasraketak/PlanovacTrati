@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import requests
 
@@ -31,30 +32,58 @@ class JizdaAutem:
     zdroj: str
 
 
-def nastaveni_soubor():
+def nastaveni_soubor() -> Path:
+    """Trvalé nastavení uživatele mimo složku programu (přežije aktualizaci i novou instalaci)."""
+    d = os.environ.get("PLANOVAC_CONFIG_DIR")
+    return (Path(d) if d else Path.home() / ".planovac") / "nastaveni.json"
+
+
+def _stary_soubor() -> Path:
     return data_dir() / "nastaveni.json"
 
 
+def _cti(f: Path) -> dict:
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def nacti_klic() -> str:
-    """API klíč Mapy.cz: proměnná prostředí má přednost před uloženým nastavením."""
+    """API klíč Mapy.cz: proměnná prostředí → trvalé nastavení → (migrace) starý soubor v data/."""
     k = os.environ.get("MAPY_API_KEY", "").strip()
     if k:
         return k
-    try:
-        return json.loads(nastaveni_soubor().read_text(encoding="utf-8")).get("mapy_klic", "").strip()
-    except Exception:
-        return ""
+    k = str(_cti(nastaveni_soubor()).get("mapy_klic", "")).strip()
+    if k:
+        return k
+    k = str(_cti(_stary_soubor()).get("mapy_klic", "")).strip()
+    if k:
+        uloz_klic(k)                      # přestěhovat do trvalého úložiště
+    return k
 
 
 def uloz_klic(klic: str) -> None:
     f = nastaveni_soubor()
-    try:
-        d = json.loads(f.read_text(encoding="utf-8"))
-    except Exception:
-        d = {}
-    d["mapy_klic"] = klic.strip()
+    d = _cti(f)
+    if klic.strip():
+        d["mapy_klic"] = klic.strip()
+    else:
+        d.pop("mapy_klic", None)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(d), encoding="utf-8")
+    try:
+        os.chmod(f, 0o600)
+    except OSError:
+        pass
+    old = _stary_soubor()
+    if old.exists():                      # starý soubor už nesmí klíč vracet po smazání
+        o = _cti(old)
+        if o.pop("mapy_klic", None) is not None:
+            try:
+                old.write_text(json.dumps(o), encoding="utf-8")
+            except OSError:
+                pass
 
 
 def _mapy(a, b, klic) -> tuple[float, float]:

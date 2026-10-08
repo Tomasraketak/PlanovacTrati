@@ -75,14 +75,21 @@ class OsmData:
 
 # --------------------------------------------------------------------------- HTTP
 
+_NEDOSTUPNY_DO = 0.0          # po úplném selhání všech serverů se Overpass na chvíli přeskakuje (jistič)
+JISTIC_S = 600.0
+
+
 def overpass(query: str, fmt: str = "json", progress: Progress | None = None, label: str = ""):
     """Provede dotaz (s cache). ``fmt`` = 'json' nebo 'csv'."""
+    global _NEDOSTUPNY_DO
     key = hashlib.sha1(query.encode("utf-8")).hexdigest()[:20]
     cfile = cache_dir("osm") / f"{key}.{fmt}"
     if cfile.exists():
         txt = cfile.read_text(encoding="utf-8")
         return json.loads(txt) if fmt == "json" else txt
 
+    if ZDROJE_REZIM == "auto" and time.time() < _NEDOSTUPNY_DO:
+        raise OverpassError(f"Overpass API nedostupné ({label}): přeskočeno po předchozím selhání")
     last_err = ""
     for rnd in range(2):
         for ep in OVERPASS_ENDPOINTS:
@@ -90,7 +97,7 @@ def overpass(query: str, fmt: str = "json", progress: Progress | None = None, la
                 host = ep.split("/")[2]
                 progress(f"OSM: stahuji {label} ({host}{', pokus ' + str(rnd + 1) if rnd else ''}) …")
             try:
-                r = requests.post(ep, data={"data": query}, timeout=150, headers={"User-Agent": USER_AGENT})
+                r = requests.post(ep, data={"data": query}, timeout=(15, 150), headers={"User-Agent": USER_AGENT})
             except requests.RequestException as e:
                 last_err = str(e)
                 continue
@@ -116,6 +123,8 @@ def overpass(query: str, fmt: str = "json", progress: Progress | None = None, la
             cfile.write_text(txt, encoding="utf-8")
             return txt
         time.sleep(5 + 10 * rnd)
+    if ZDROJE_REZIM == "auto":
+        _NEDOSTUPNY_DO = time.time() + JISTIC_S
     raise OverpassError(f"Overpass API nedostupné ({label}): {last_err}")
 
 

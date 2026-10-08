@@ -851,10 +851,14 @@ def auto_sekce_gui(R, RJ, J):
                                  format_func={"auto": "Automaticky (Mapy.cz s klíčem, jinak OSRM)",
                                               "mapy": "Mapy.cz (API klíč)", "osrm": "OSRM (bez klíče)"}.get)
     klic_in = cz[1].text_input("Mapy.cz API klíč", value=auto_mod.nacti_klic(), type="password",
-                               help="Zdarma na developer.mapy.com → Routing API. Uloží se jen lokálně "
-                                    "(data/nastaveni.json), nebo nastavte proměnnou MAPY_API_KEY.")
+                               help="Zdarma na developer.mapy.com → Routing API. Uloží se trvale jen na tomto počítači "
+                                    "(~/.planovac), nebo nastavte proměnnou MAPY_API_KEY.")
     if klic_in != auto_mod.nacti_klic() and not os.environ.get("MAPY_API_KEY"):
         auto_mod.uloz_klic(klic_in)
+        st.toast("API klíč uložen trvale.")
+    if auto_mod.nacti_klic() and not os.environ.get("MAPY_API_KEY"):
+        st.caption(f"🔑 Klíč je uložen trvale v `{auto_mod.nastaveni_soubor()}` – zůstane i po aktualizaci "
+                   "(smazat: vymažte pole).")
     cz[2].write("")
     if cz[2].button("🚗 Načíst", width="stretch", help="Zjistí dobu jízdy autem mezi stanicemi"):
         with st.spinner("Ptám se routovací služby …"):
