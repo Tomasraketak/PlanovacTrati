@@ -90,7 +90,20 @@ function Aktualizuj-Zdroj {
             try {
                 if ($env:PLANOVAC_BRANCH) { git fetch origin $env:PLANOVAC_BRANCH; git checkout $env:PLANOVAC_BRANCH }
                 git pull --ff-only
-                if ($LASTEXITCODE -ne 0) { Write-Host '[Planovac] Aktualizace se nepodarila (mate lokalni zmeny?) - spoustim stavajici verzi.' -ForegroundColor Yellow }
+                if ($LASTEXITCODE -ne 0) {
+                    # lokalni zmeny (casto jen konce radku v *.bat) blokuji aktualizaci - odlozit je (git stash list) a zkusit znovu
+                    Zprava 'Odkladam lokalni zmeny souboru programu (git stash) a zkousim znovu ...'
+                    git stash push -m "planovac: lokalni zmeny pred aktualizaci $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+                    git pull --ff-only
+                    if ($LASTEXITCODE -ne 0) {
+                        # starsi verze mely *.bat s jinymi konci radku, nez chce .gitattributes - git je hlasi jako
+                        # zmenene i po stash; posunout na verzi z GitHubu (jen kdyz nejsou lokalni commity)
+                        git fetch
+                        git merge-base --is-ancestor HEAD '@{u}'
+                        if ($LASTEXITCODE -eq 0) { git reset --hard '@{u}' }
+                    }
+                }
+                if ($LASTEXITCODE -ne 0) { Write-Host '[Planovac] Aktualizace se nepodarila - spoustim stavajici verzi.' -ForegroundColor Yellow }
             } finally { Pop-Location }
         }
     } elseif (-not (Test-Path (Join-Path $Slozka 'app.py'))) {

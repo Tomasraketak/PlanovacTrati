@@ -74,6 +74,18 @@ def aktualizuj() -> tuple[bool, str]:
         r = _git("pull", "--ff-only", timeout=300)
         log.append((r.stdout + r.stderr).strip())
         if r.returncode != 0:
+            # lokální změny (často jen konce řádků v *.bat) blokují aktualizaci – odložit (git stash list) a znovu
+            s = _git("stash", "push", "-m", "planovac: lokální změny před aktualizací", timeout=120)
+            log.append((s.stdout + s.stderr).strip())
+            r = _git("pull", "--ff-only", timeout=300)
+            log.append((r.stdout + r.stderr).strip())
+        if r.returncode != 0 and _git("fetch", timeout=300).returncode == 0 \
+                and _git("merge-base", "--is-ancestor", "HEAD", "@{u}").returncode == 0:
+            # starší verze měly *.bat s jinými konci řádků, než chce .gitattributes – git je hlásí jako změněné i po
+            # stash; bez lokálních commitů je bezpečné přejít přímo na verzi z GitHubu
+            r = _git("reset", "--hard", "@{u}", timeout=120)
+            log.append((r.stdout + r.stderr).strip())
+        if r.returncode != 0:
             return False, "\n".join(log) + "\n\nAktualizace selhala (lokální změny souborů?)."
         h = _hash_pozadavku()
         hf = _hash_soubor()

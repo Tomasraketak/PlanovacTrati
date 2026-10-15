@@ -21,7 +21,7 @@ done
 if [ -d "$DIR/.git" ]; then
   if [ -z "${PLANOVAC_BEZ_AKTUALIZACE:-}" ] && command -v git >/dev/null 2>&1; then
     zprava "Aktualizuji program (git pull) ..."
-    ( cd "$DIR" && { [ -z "${PLANOVAC_BRANCH:-}" ] || { git fetch origin "$PLANOVAC_BRANCH" && git checkout "$PLANOVAC_BRANCH"; }; } && git pull --ff-only ) \
+    ( cd "$DIR" && { [ -z "${PLANOVAC_BRANCH:-}" ] || { git fetch origin "$PLANOVAC_BRANCH" && git checkout "$PLANOVAC_BRANCH"; }; } && { git pull --ff-only || { zprava "Odkladam lokalni zmeny (git stash) a zkousim znovu ..."; git stash push -m "planovac: lokalni zmeny pred aktualizaci"; git pull --ff-only || { git fetch && git merge-base --is-ancestor HEAD "@{u}" && git reset --hard "@{u}"; }; }; } ) \
       || echo "[Planovac] Aktualizace se nepodarila (lokalni zmeny?) - spoustim stavajici verzi."
   fi
 elif [ ! -f "$DIR/app.py" ]; then
