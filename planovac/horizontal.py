@@ -69,7 +69,8 @@ def _unit(v):
     return v / n if n > 1e-12 else np.array([1.0, 0.0])
 
 
-def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref, R_stanice=None) -> list[_PI]:
+def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref, R_stanice=None, faktor: float = 1.0) -> list[_PI]:
+    """``faktor`` < 1 zkrátí pomocné úseky kolem zadaných bodů (nouzově i nástupiště) – záchrana proti smyčce."""
     n = len(points_xy)
     # 1) surová posloupnost vrcholů: (xy, index zadaného bodu nebo None)
     raw: list[tuple[np.ndarray, int | None]] = [(np.asarray(points_xy[0], float), 0)]
@@ -96,6 +97,23 @@ def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref, R_stanice=None)
         delta = np.arccos(np.clip(np.dot(u, v), -1, 1))
         R_j = min(Rpref, R_stanice) if (R_stanice and je_stanice[j]) else Rpref
         dist_D.append(half[j] + 1.2 * R_j * np.tan(delta / 4) + 40.0)
+    # pomocné vrcholy nesmí přesáhnout sousední zadaný bod: mezeru k sousednímu mezilehlému bodu si dělí napůl
+    # (bez toho se u blízkých průjezdních bodů pomocné vrcholy překříží a vznikne spirála)
+    P = [np.asarray(p, float) for p in points_xy]
+    D_pred, D_za = list(dist_D), list(dist_D)
+    for j in range(1, n - 1):
+        for sous, cil in ((j - 1, D_pred), (j + 1, D_za)):
+            gap = float(np.hypot(*(P[sous] - P[j])))
+            lim = 0.45 * gap if 0 < sous < n - 1 else 0.9 * gap - half[sous]
+            cil[j] = min(cil[j], max(lim, half[j]))
+        if faktor < 1.0:
+            # nouzově: kratší pomocné úseky; při faktor < 0,5 i kratší nástupiště (jinak by vznikla smyčka)
+            spodni = half[j] if faktor >= 0.5 else 0.0
+            D_pred[j] = max(D_pred[j] * faktor, spodni, 2.0)
+            D_za[j] = max(D_za[j] * faktor, spodni, 2.0)
+        if je_stanice[j]:                      # nástupiště je symetrické kolem bodu
+            D_pred[j] = D_za[j] = min(D_pred[j], D_za[j])
+        dist_D[j] = max(D_pred[j], D_za[j])
     # 2) vrcholy uvnitř zóny mezilehlého bodu (nástupiště) zahodit
     keep_raw = []
     for xy, j in raw:
@@ -117,9 +135,8 @@ def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref, R_stanice=None)
             out.append(_PI(xy, fixed=True))
         else:
             t = _unit(keep_raw[idx + 1][0] - keep_raw[idx - 1][0])
-            D = dist_D[j]
-            out.append(_PI(xy - D * t, fixed=True, req_after=2 * half[j], sym_after=True))
-            out.append(_PI(xy + D * t, fixed=True))
+            out.append(_PI(xy - D_pred[j] * t, fixed=True, req_after=2 * half[j], sym_after=True))
+            out.append(_PI(xy + D_za[j] * t, fixed=True))
     cleaned: list[_PI] = []
     for p in out:
         if cleaned and np.hypot(*(p.xy - cleaned[-1].xy)) < 1.0 and not p.fixed:
@@ -168,7 +185,33 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
                   zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None,
                   rmin_useky: list[float] | None = None,
                   stanice_zona: tuple[list, float, float] | None = None) -> Alignment:
-    """Vloží přímé a oblouky do koridorů.
+    """Vloží přímé a oblouky do koridorů (viz ``_fit_alignment``) a zaručí, že se osa nekříží sama se sebou.
+
+    Kdyby se křížila (blízké zadané body, ostré lomy), zkrátí postupně pomocné úseky kolem zadaných bodů,
+    nakonec vede osu přímo zadanými body s vepsanými oblouky.
+    """
+    al = None
+    for faktor in (1.0, 0.6, 0.3, 0.1, 0.0):
+        al = _fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp, tol, ds, zony, ref_xy, rmin_useky,
+                            stanice_zona, faktor)
+        if _bez_smycky(al.xy):
+            if faktor < 0.5 and any(je_stanice[1:-1]):
+                al.varovani.append("Zadané body jsou příliš blízko sebe nebo v ostrém úhlu – aby osa netvořila "
+                                   "smyčku, bylo u některé mezilehlé stanice zkráceno nástupiště.")
+            return al
+    if _bez_smycky(np.asarray(points_xy, float)):
+        al.varovani.append("Osa se kříží sama se sebou – zadané body jsou příliš blízko sebe nebo se trasa mezi nimi "
+                           "vrací; upravte jejich polohu.")
+    else:
+        al.varovani.append("Osa se kříží sama se sebou – kříží se už samotná spojnice zadaných bodů, upravte jejich pořadí.")
+    return al
+
+
+def _fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=150.0, ds=10.0,
+                  zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None,
+                  rmin_useky: list[float] | None = None,
+                  stanice_zona: tuple[list, float, float] | None = None, faktor: float = 1.0) -> Alignment:
+    """Vloží přímé a oblouky do koridorů (jeden pokus; ``faktor`` viz ``_build_pis``).
 
     ``rmin_useky`` – min. poloměr pro každý úsek mezi sousedními zadanými body (ručně snížená rychlost úseku);
     vrchol patří úseku, jehož koridor je mu nejblíž.
@@ -178,7 +221,7 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
     až s poloměrem Rmin (vlak tam stejně brzdí / rozjíždí se) a přímá u nástupiště se počítá pro tento poloměr.
     """
     pis = _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref,
-                     stanice_zona[2] if stanice_zona else None)
+                     stanice_zona[2] if stanice_zona else None, faktor)
     varovani: list[str] = []
     # odstranit téměř přímé vrcholy
     if len(pis) > 2:
@@ -302,7 +345,7 @@ def _generate(pis, R, delta, points_xy, ds, varovani) -> Alignment:
     xs.append(cur[None, :])
     ks.append(np.zeros(1))
     for k in range(1, n - 1):
-        if delta[k] < 1e-6 or not np.isfinite(R[k]):
+        if delta[k] < 1e-6 or not np.isfinite(R[k]) or R[k] < 1.0:
             add_line(cur, pis[k].xy)
             cur = pis[k].xy.copy()
             continue
