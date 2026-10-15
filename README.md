@@ -39,7 +39,7 @@ v prohlížeči (<http://localhost:8501>). Celý program se pak ovládá z okna 
 ### 🪟 Windows (PowerShell nebo cmd)
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((irm 'https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1') -join [Environment]::NewLine)"
 ```
 
 ### 🐧 Linux / 🍎 macOS

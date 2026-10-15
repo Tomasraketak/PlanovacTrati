@@ -1,6 +1,6 @@
 # ===== Planovac trati - instalace / aktualizace / spusteni jednim prikazem (Windows PowerShell 5.1+) =====
 # Pouziti (v cistem terminalu):
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "iex ((irm 'https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1') -join [Environment]::NewLine)"
 # Nastaveni pres promenne prostredi (nepovinne):
 #   PLANOVAC_DIR                 cilova slozka (vychozi %USERPROFILE%\PlanovacTrati, nebo slozka tohoto skriptu)
 #   PLANOVAC_BEZ_AKTUALIZACE=1   nestahovat novou verzi, jen spustit
