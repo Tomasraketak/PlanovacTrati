@@ -53,6 +53,7 @@ class NavrhoveParametry:
     vyska_nasypu_max_m: float = 15.0       # nad touto výškou už jen estakáda
     hloubka_zarezu_max_m: float = 20.0     # pod touto hloubkou už jen tunel
     vyska_estakady_min_m: float = 8.0      # od této výšky smí být estakáda (volí se levnější)
+    vyska_estakady_max_m: float = 0.0      # max. výška nivelety nad terénem na estakádě/mostě (0 = bez omezení)
     hloubka_tunelu_min_m: float = 15.0     # min. hloubka nivelety pod terénem pro ražený tunel
     min_delka_tunelu_m: float = 300.0      # kratší tunely se mění na zářez / hloubený tunel
     min_delka_estakady_m: float = 60.0
@@ -163,8 +164,9 @@ class Ceny:
     technologie_mil_km: float = 110.0      # trakce 25 kV, ETCS L2, GSM-R/FRMCS, napájení
     nasyp_kc_m3: float = 450.0
     vykop_kc_m3: float = 550.0
-    estakada_mil_km: float = 650.0         # do výšky 20 m
-    estakada_prirazka_pct_m: float = 2.0   # přirážka za každý metr výšky nad 20 m
+    estakada_mil_km: float = 650.0         # do výšky estakada_vyska_zaklad_m
+    estakada_vyska_zaklad_m: float = 20.0  # do této výšky platí základní cena estakády/mostu
+    estakada_prirazka_pct_m: float = 2.0   # přirážka za každý metr výšky nad estakada_vyska_zaklad_m
     most_mil_km: float = 900.0             # mosty přes vodní toky a nádrže
     tunel_mil_km: float = 1300.0           # ražený dvoukolejný tunel
     portal_mil: float = 150.0              # za každý tunel (2 portály)

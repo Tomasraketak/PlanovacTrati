@@ -43,13 +43,15 @@ def option_costs(h: np.ndarray, navrh: NavrhoveParametry, ceny: Ceny, voda: bool
     pripl = np.where(zast, ceny.zastavba_prirazka_mil_km * 1000.0, 0.0)
     zem = zem + pripl
     zem_ok = (h <= navrh.vyska_nasypu_max_m) & (h >= -navrh.hloubka_zarezu_max_m) & ~voda
-    estak = ceny.estakada_mil_km * 1000.0 * (1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - 20.0, 0))
+    prirazka = 1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - ceny.estakada_vyska_zaklad_m, 0)
+    vyska_ok = h <= navrh.vyska_estakady_max_m if navrh.vyska_estakady_max_m > 0 else True
+    estak = ceny.estakada_mil_km * 1000.0 * prirazka
     estak = estak + 0.3 * demol + 12.0 * ceny.pozemky_kc_m2 + 0.5 * pripl
-    est_ok = (h >= navrh.vyska_estakady_min_m) & ~voda
+    est_ok = (h >= navrh.vyska_estakady_min_m) & ~voda & vyska_ok
     tunel = np.full(h.shape, ceny.tunel_mil_km * 1000.0)
     tun_ok = (h <= -navrh.hloubka_tunelu_min_m) | (zast & (h <= -navrh.hloubka_tunelu_pod_mestem_m))
-    most = ceny.most_mil_km * 1000.0 * (1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - 20.0, 0)) + 0.3 * demol
-    most_ok = voda & (h >= 4.0)
+    most = ceny.most_mil_km * 1000.0 * prirazka + 0.3 * demol
+    most_ok = voda & (h >= 4.0) & vyska_ok
     out = np.stack([
         np.where(zem_ok, zem, np.inf),
         np.where(est_ok, estak, np.inf),
@@ -131,7 +133,7 @@ def design_profile(
     kmax = np.floor(gmax * ds / dz + 1e-9).astype(int)
 
     zmin = float(zc.min()) - max(40.0, navrh.hloubka_tunelu_min_m + 25)
-    zmax = float(zc.max()) + 40.0
+    zmax = float(zc.max()) + max(40.0, navrh.vyska_estakady_max_m + 5.0)
     # hrubší hladiny pro velké rozsahy (paměť)
     while (zmax - zmin) / dz > 6000:
         dz *= 2

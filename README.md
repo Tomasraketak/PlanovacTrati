@@ -157,7 +157,7 @@ vahy: {obce: 1.0, budovy: 1.0, teren: 1.0, voda: 1.0, chranena_uzemi: 1.0, delka
 ## 🔬 Jak to funguje
 
 1. **Data** – výškový model Copernicus GLO-30 (AWS Open Data) a OpenStreetMap (Overpass API; při jeho výpadku záložně Overture Maps): zástavba, budovy,
-   vody, silnice, železnice, chráněná území. Vše se ukládá do `data/cache/`.
+   vody, silnice, železnice, chráněná území. Vše se ukládá do `data/cache/` po pevných dlaždicích (výškový model 1°, vrstvy OSM 0,5°, budovy 0,3°), takže jednou stažené území využije každý další výpočet i projekt a cache přežije i aktualizaci programu.
 2. **Nákladová mapa** – každé buňce rastru se přiřadí „cena za metr trati“ podle zástavby, budov, členitosti terénu,
    vody a ochrany přírody (s vahami z GUI). Okolí stanic se nepenalizuje.
 3. **Koridor** – Dijkstrův algoritmus najde nejlevnější cestu v elipse povoleného prodloužení; pokud je trasa

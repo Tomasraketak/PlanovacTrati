@@ -206,7 +206,8 @@ def _index(theme: str, typ: str, rel: str, progress: Progress | None) -> dict[st
 def cti(theme: str, typ: str, bbox, sloupce: list[str], progress: Progress | None = None):
     """Vrátí ``pyarrow.Table`` s řádky, jejichž bbox leží (aspoň částečně) v ``bbox`` = (W, S, E, N).
 
-    Cache výsledku je na disku (klíč = vydání, vrstva, obdélník, sloupce).
+    Cache výsledku je na disku (klíč = vrstva, obdélník, sloupce – bez vydání, aby nové měsíční vydání Overture
+    nevynutilo stažení všeho znovu).
     """
     import hashlib
 
@@ -214,15 +215,15 @@ def cti(theme: str, typ: str, bbox, sloupce: list[str], progress: Progress | Non
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
 
-    rel = vydani()
     w, s, e, n = bbox
-    key = hashlib.sha1(f"{rel}|{theme}|{typ}|{bbox}|{sloupce}".encode()).hexdigest()[:20]
+    key = hashlib.sha1(f"{theme}|{typ}|{tuple(bbox)}|{sloupce}".encode()).hexdigest()[:20]
     cf = cache_dir("overture") / f"{key}.parquet"
     if cf.exists():
         try:
             return pq.read_table(cf)
         except Exception:
             pass
+    rel = vydani()
     idx = _index(theme, typ, rel, progress)
     ukoly = [(k, g) for k, rgs in idx.items() for g, st in enumerate(rgs)
              if st[1] >= w and st[0] <= e and st[3] >= s and st[2] <= n]

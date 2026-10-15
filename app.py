@@ -186,6 +186,9 @@ with st.sidebar:
             w(n, "vyska_nasypu_max_m", "Max. výška násypu [m]", min_value=3.0, max_value=40.0, step=1.0)
             w(n, "hloubka_zarezu_max_m", "Max. hloubka zářezu [m]", min_value=3.0, max_value=40.0, step=1.0)
             w(n, "vyska_estakady_min_m", "Estakáda od výšky [m]", min_value=3.0, max_value=30.0, step=1.0)
+            w(n, "vyska_estakady_max_m", "Max. výška estakády / mostu [m] (0 = bez omezení)", min_value=0.0,
+              max_value=150.0, step=5.0, help="Výška nivelety nad terénem. Vyšší estakádu program nepostaví – údolí "
+              "obejde, přejde násypem nebo zvolí jinou niveletu.")
             w(n, "hloubka_tunelu_min_m", "Ražený tunel od hloubky [m]", min_value=5.0, max_value=40.0, step=1.0)
             w(n, "min_delka_tunelu_m", "Min. délka raženého tunelu [m]", min_value=0.0, max_value=2000.0, step=50.0)
             w(n, "polomer_stanice_m", "Okruh kolem stanice bez penalizace zástavby [m]", min_value=0.0,
@@ -417,6 +420,8 @@ def koeficienty_tab():
         w(c, "portal_mil", "Portály tunelu [mil./tunel]", min_value=0.0, step=10.0)
         w(c, "hloubeny_tunel_mil_km", "Hloubený tunel [mil./km]", min_value=0.0, step=50.0)
         w(c, "estakada_mil_km", "Estakáda [mil./km]", min_value=0.0, step=25.0)
+        w(c, "estakada_vyska_zaklad_m", "Estakáda/most: základní cena do výšky [m]", min_value=0.0, step=5.0)
+        w(c, "estakada_prirazka_pct_m", "Estakáda/most: přirážka za každý metr nad tím [%]", min_value=0.0, step=0.5)
         w(c, "most_mil_km", "Most přes vodu [mil./km]", min_value=0.0, step=25.0)
         w(c, "nasyp_kc_m3", "Násyp [Kč/m³]", min_value=0.0, step=25.0)
         w(c, "vykop_kc_m3", "Výkop [Kč/m³]", min_value=0.0, step=25.0)

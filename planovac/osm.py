@@ -8,8 +8,9 @@ Vrstvy:
 * chráněná území,
 * budovy (středy, pro počty demolic).
 
-Každá odpověď se ukládá do ``data/cache/osm`` (klíč = hash dotazu), takže
-opakovaný výpočet nepotřebuje internet. Overpass bývá přetížený, proto se
+Plošné vrstvy se stahují po pevných dlaždicích 0,5° × 0,5° a každá odpověď se ukládá do
+``data/cache/osm`` (klíč = hash dotazu). Jednou stažené území tak využije každý další výpočet
+i jiný projekt, který do něj zasahuje – i po aktualizaci programu; opakovaný výpočet nepotřebuje internet. Overpass bývá přetížený, proto se
 zkouší několik serverů s opakováním a při selhání se vrstva vynechá s varováním.
 """
 from __future__ import annotations
@@ -126,6 +127,47 @@ def overpass(query: str, fmt: str = "json", progress: Progress | None = None, la
     if ZDROJE_REZIM == "auto":
         _NEDOSTUPNY_DO = time.time() + JISTIC_S
     raise OverpassError(f"Overpass API nedostupné ({label}): {last_err}")
+
+
+DLAZDICE_DEG = 0.5      # pevná mřížka dlaždic plošných vrstev (stejné dlaždice = stejné dotazy = cache)
+
+
+def dlazdice(bbox, deg: float = DLAZDICE_DEG) -> list[tuple[float, float, float, float]]:
+    """Dlaždice pevné mřížky ``deg`` stupňů, které pokrývají ``bbox`` = (W, S, E, N)."""
+    import math
+
+    w, s, e, n = bbox
+    i0, i1 = math.floor(w / deg + 1e-9), math.ceil(e / deg - 1e-9)
+    j0, j1 = math.floor(s / deg + 1e-9), math.ceil(n / deg - 1e-9)
+    return [(round(i * deg, 4), round(j * deg, 4), round((i + 1) * deg, 4), round((j + 1) * deg, 4))
+            for j in range(j0, max(j1, j0 + 1)) for i in range(i0, max(i1, i0 + 1))]
+
+
+def _v_obdelniku(el: dict, bbox) -> bool:
+    w, s, e, n = bbox
+    b = el.get("bounds")
+    if b:
+        return b["minlon"] <= e and b["maxlon"] >= w and b["minlat"] <= n and b["maxlat"] >= s
+    if "lat" in el:
+        return w <= el["lon"] <= e and s <= el["lat"] <= n
+    return True
+
+
+def overpass_dlazdice(dotaz: Callable[[str], str], bbox, progress: Progress | None = None, label: str = "") -> dict:
+    """Spustí ``dotaz(bbox_str)`` pro každou dlaždici (s cache) a spojí prvky bez duplicit (podle typu a id)."""
+    tiles = dlazdice(bbox)
+    videno: set = set()
+    prvky = []
+    for i, tb in enumerate(tiles):
+        data = overpass(dotaz(_bbox_str(tb)), progress=progress,
+                        label=f"{label} {i + 1}/{len(tiles)}" if len(tiles) > 1 else label)
+        for el in data.get("elements", []):
+            k = (el.get("type"), el.get("id"))
+            if k in videno or not _v_obdelniku(el, bbox):
+                continue
+            videno.add(k)
+            prvky.append(el)
+    return {"elements": prvky}
 
 
 def _bbox_str(bbox) -> str:
@@ -249,22 +291,40 @@ def _polys(g):
     return [p for p in getattr(g, "geoms", [g]) if p.geom_type == "Polygon" and not p.is_empty]
 
 
+def _ov_geometrie(theme: str, typ: str, bbox, sloupce: list[str], progress):
+    """``zdroje.geometrie`` po pevných dlaždicích (cache se sdílí mezi oblastmi), bez duplicit podle id."""
+    w, s, e, n = bbox
+    videno: set = set()
+    out = []
+    for tb in dlazdice(bbox):
+        for r, g in zdroje.geometrie(theme, typ, tb, sloupce + ["id"], progress):
+            k = r.get("id") or (typ, g.wkb)
+            if k in videno:
+                continue
+            gw, gs, ge, gn = g.bounds
+            if gw > e or ge < w or gs > n or gn < s:
+                continue
+            videno.add(k)
+            out.append((r, g))
+    return out
+
+
 def _ov_zastavba(osm: OsmData, bbox, progress):
     cil = {"residential", "industrial", "commercial", "retail", "garages", "farmyard", "developed"}
-    for r, g in zdroje.geometrie("base", "land_use", bbox, ["class", "subtype"], progress):
+    for r, g in _ov_geometrie("base", "land_use", bbox, ["class", "subtype"], progress):
         if (r.get("class") in cil) or (r.get("subtype") == "developed" and r.get("class") in (None, "")):
             osm.zastavba += [p for p in map(_xy_geom, _polys(g))]
 
 
 def _ov_obce(osm: OsmData, bbox, progress):
-    for r, g in zdroje.geometrie("divisions", "division", bbox, ["class", "subtype", "names"], progress):
+    for r, g in _ov_geometrie("divisions", "division", bbox, ["class", "subtype", "names"], progress):
         if g.geom_type == "Point" and r.get("class") in ("city", "town", "village", "hamlet"):
             x, y = to_xy(g.x, g.y)
             osm.obce.append((_nazev(r), r["class"], Point(x, y)))
 
 
 def _ov_voda(osm: OsmData, bbox, progress):
-    for r, g in zdroje.geometrie("base", "water", bbox, ["class", "subtype", "names"], progress):
+    for r, g in _ov_geometrie("base", "water", bbox, ["class", "subtype", "names"], progress):
         if g.geom_type in ("LineString", "MultiLineString"):
             for ls in getattr(g, "geoms", [g]):
                 osm.reky.append((_nazev(r), _xy_geom(ls)))
@@ -273,7 +333,7 @@ def _ov_voda(osm: OsmData, bbox, progress):
 
 
 def _ov_doprava(osm: OsmData, bbox, progress):
-    for r, g in zdroje.geometrie("transportation", "segment", bbox, ["class", "subtype", "names"], progress):
+    for r, g in _ov_geometrie("transportation", "segment", bbox, ["class", "subtype", "names"], progress):
         for ls in getattr(g, "geoms", [g]):
             if ls.geom_type != "LineString":
                 continue
@@ -309,13 +369,13 @@ def _q(body: str, timeout: int = 180) -> str:
 def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progress | None = None) -> OsmData:
     """Stáhne všechny vrstvy pro obdélník ``bbox`` = (west, south, east, north).
 
-    Obdélník se zaokrouhlí ven na 0,1°, aby drobné změny bodů trasy využily data z cache.
+    Vrstvy se stahují po pevných dlaždicích (``DLAZDICE_DEG``), takže jakákoli oblast, která už byla
+    stažena (i v jiném projektu nebo před aktualizací), se bere z cache na disku.
     """
     import math
 
     bbox = (math.floor(bbox[0] * 10) / 10, math.floor(bbox[1] * 10) / 10,
             math.ceil(bbox[2] * 10) / 10, math.ceil(bbox[3] * 10) / 10)
-    b = _bbox_str(bbox)
     osm = OsmData()
 
     def safe(label, fn, zalozni=None):
@@ -343,26 +403,26 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
             log.warning("%s", chyba)
 
     def zastavba():
-        data = overpass(_q(
+        data = overpass_dlazdice(lambda b: _q(
             f'way["landuse"~"^(residential|industrial|commercial|retail|garages|farmyard)$"]{b};'
             f'relation["landuse"~"^(residential|industrial|commercial|retail)$"]{b};'
-        ), progress=progress, label="zástavba")
+        ), bbox, progress, "zástavba")
         osm.zastavba = [p for _, p in _polygons(data)]
 
     def obce():
-        data = overpass(
-            f'[out:json][timeout:120];node["place"~"^(city|town|village|hamlet)$"]{b};out qt;',
-            progress=progress, label="obce")
+        data = overpass_dlazdice(
+            lambda b: f'[out:json][timeout:120];node["place"~"^(city|town|village|hamlet)$"]{b};out qt;',
+            bbox, progress, "obce")
         for el in data.get("elements", []):
             name = el.get("tags", {}).get("name", "")
             x, y = to_xy(el["lon"], el["lat"])
             osm.obce.append((name, el["tags"].get("place", ""), Point(x, y)))
 
     def voda():
-        data = overpass(_q(
+        data = overpass_dlazdice(lambda b: _q(
             f'way["natural"="water"]{b};relation["natural"="water"]{b};'
             f'way["landuse"="reservoir"]{b};way["waterway"~"^(river|canal)$"]{b};'
-        ), progress=progress, label="vodstvo")
+        ), bbox, progress, "vodstvo")
         polys = []
         for el in data.get("elements", []):
             tags = el.get("tags", {})
@@ -378,9 +438,9 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
         osm.voda_plochy = polys
 
     def doprava():
-        data = overpass(_q(
+        data = overpass_dlazdice(lambda b: _q(
             f'way["highway"~"^(motorway|trunk|primary|secondary)$"]{b};way["railway"="rail"]["service"!~"."]{b};'
-        ), progress=progress, label="silnice a železnice")
+        ), bbox, progress, "silnice a železnice")
         for tags, ls in _lines(data):
             if tags.get("railway") == "rail":
                 osm.zeleznice.append(ls)
@@ -388,10 +448,10 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
                 osm.silnice.append((tags.get("highway", ""), tags.get("ref", tags.get("name", "")), ls))
 
     def chranena_uzemi():
-        data = overpass(_q(
+        data = overpass_dlazdice(lambda b: _q(
             f'relation["boundary"~"^(protected_area|national_park)$"]{b};way["boundary"="protected_area"]{b};'
             f'relation["leisure"="nature_reserve"]{b};way["leisure"="nature_reserve"]{b};'
-        ), progress=progress, label="chráněná území")
+        ), bbox, progress, "chráněná území")
         for tags, p in _polygons(data):
             osm.chranena.append((tags.get("name", "chráněné území"), _protect_level(tags), p))
 

@@ -34,7 +34,7 @@ def cena_metru(h: np.ndarray, typy: np.ndarray, navrh, ceny: Ceny) -> np.ndarray
     ah = np.abs(h)
     area = ah * (b + n * ah)
     zaklad = (ceny.trat_zaklad_mil_km + ceny.technologie_mil_km) * 1000.0
-    prirazka = 1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - 20.0, 0)
+    prirazka = 1 + ceny.estakada_prirazka_pct_m / 100.0 * np.maximum(h - ceny.estakada_vyska_zaklad_m, 0)
     zem = np.isin(typy, (UROVEN, NASYP, ZAREZ))
     c = np.where(zem, np.where(h >= 0, area * ceny.nasyp_kc_m3, area * ceny.vykop_kc_m3)
                  + (b + 2 * n * ah + 6.0) * ceny.pozemky_kc_m2, 0.0)
@@ -73,7 +73,7 @@ def estimate(delka_m: float, s: np.ndarray, h: np.ndarray, an: Analyza, n_mezile
             L += u.delka
             m = (s >= u.s0) & (s <= u.s1)
             hh = float(np.mean(h[m])) if m.any() else 0.0
-            f = 1 + ceny.estakada_prirazka_pct_m / 100.0 * max(hh - 20.0, 0.0) if vyska_prirazka else 1.0
+            f = 1 + ceny.estakada_prirazka_pct_m / 100.0 * max(hh - ceny.estakada_vyska_zaklad_m, 0.0) if vyska_prirazka else 1.0
             C += u.delka / 1000.0 * zaklad_mil_km * f
         return L, C
 
