@@ -486,54 +486,78 @@ max. sklon {P.navrh.max_sklon_promile:g} ‰ · prodloužení max. {P.navrh.max_
 
 # =============================================================================== výpočet
 
+# Výpočet běží ve vlastním vlákně a průběh se jen čte z fragmentu. Dřív běžel přímo ve skriptu a zapisoval do
+# st.progress/st.status – když uživatel přepnul záložku prohlížeče, spojení se přerušilo a po návratu frontend
+# dostal změny pro prvky, které neměl („Bad delta path index“ → bílá obrazovka).
+def _spust_vypocet(projekt):
+    import threading
+    from planovac.pipeline import run_project
+
+    job = {"frac": 0.0, "msg": "Začínám …", "log": [], "res": None, "err": None, "tb": "", "done": False,
+           "t0": time.time(), "t1": None}
+
+    def cb(frac, msg):
+        job["frac"] = min(max(float(frac), 0.0), 1.0)
+        if msg != job["msg"] or not job["log"]:
+            job["log"].append(msg)
+        job["msg"] = msg
+
+    def beh():
+        try:
+            job["res"] = run_project(projekt, cb)
+        except Exception as e:                         # noqa: BLE001 – zobrazí se uživateli
+            import traceback
+
+            job["err"], job["tb"] = e, traceback.format_exc()
+            print(job["tb"])
+            diagnostika.zapis_vyjimku("výpočet trati")
+        finally:
+            job["t1"] = time.time()
+            job["done"] = True
+
+    threading.Thread(target=beh, daemon=True, name="planovac-vypocet").start()
+    return job
+
+
 if spustit:
     chyby = P.validate()
     if chyby:
         for ch in chyby:
             st.error(ch)
+    elif st.session_state.get("_job") and not st.session_state["_job"]["done"]:
+        st.warning("Výpočet už běží.")
     else:
-        from planovac.pipeline import run_project
+        st.session_state["_job"] = _spust_vypocet(copy.deepcopy(P))
 
-        bar = st.progress(0.0, text="Začínám …")
-        with st.status("Navrhuji trať …", expanded=True) as status:
-            last = {"msg": ""}
 
-            import threading
+@st.fragment(run_every=1)
+def _prubeh_vypoctu():
+    job = st.session_state.get("_job")
+    if not job:
+        return
+    if job["done"]:
+        if job["err"] is None:
+            st.session_state.vysledek = job["res"]
+            st.session_state["karta"] = "🚄 Výsledek"
+            st.session_state["_job_hotovo"] = f"Hotovo za {job['t1'] - job['t0']:.0f} s ✅"
+        else:
+            st.session_state["_job_chyba"] = (job["err"], job["tb"])
+        st.session_state["_job"] = None
+        st.rerun()
+        return
+    st.progress(job["frac"], text=job["msg"])
+    with st.status(f"Navrhuji trať … ({time.time() - job['t0']:.0f} s)", expanded=True):
+        for m in job["log"][-12:]:
+            st.write(m)
 
-            from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
-            ctx = get_script_run_ctx()
-            zamek = threading.Lock()
-
-            def cb(frac, msg):
-                # výpočet volá průběh i z pracovních vláken – ty musí dostat kontext relace Streamlitu
-                if threading.current_thread() is not threading.main_thread() and ctx is not None:
-                    add_script_run_ctx(threading.current_thread(), ctx)
-                # Zámek je nutný: souběžný zápis z více vláken do jednoho kontejneru pošle změny prohlížeči mimo
-                # pořadí a frontend spadne na „Bad delta path index“ (bílá obrazovka, v terminálu nic).
-                with zamek:
-                    try:
-                        bar.progress(min(max(frac, 0.0), 1.0), text=msg)
-                        if msg != last["msg"]:
-                            status.write(msg)
-                            last["msg"] = msg
-                    except Exception:              # průběh je jen kosmetický – nesmí shodit výpočet
-                        pass
-
-            try:
-                t0 = time.time()
-                res = run_project(copy.deepcopy(P), cb)
-                st.session_state.vysledek = res
-                st.session_state["karta"] = "🚄 Výsledek"
-                status.update(label=f"Hotovo za {time.time() - t0:.0f} s ✅", state="complete", expanded=False)
-            except Exception as e:  # zobrazit uživateli
-                import traceback
-
-                traceback.print_exc()          # do konzole/logu (v GUI je výjimka jen sbalená ve stavu)
-                diagnostika.zapis_vyjimku("výpočet trati")
-                status.update(label="Výpočet selhal ❌", state="error")
-                st.exception(e)
-        bar.empty()
+_prubeh_vypoctu()
+if st.session_state.get("_job_hotovo"):
+    st.success(st.session_state.pop("_job_hotovo"))
+if st.session_state.get("_job_chyba"):
+    _e, _tb = st.session_state.pop("_job_chyba")
+    st.error("Výpočet selhal ❌")
+    st.exception(_e)
 
 R = st.session_state.vysledek
 
