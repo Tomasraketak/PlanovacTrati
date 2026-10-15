@@ -36,10 +36,18 @@ Otevřete **nový terminál**, vložte jediný příkaz a stiskněte Enter. Př�
 Python a Git, stáhne program, nainstaluje knihovny, **při každém spuštění stáhne novou verzi** a otevře aplikaci
 v prohlížeči (<http://localhost:8501>). Celý program se pak ovládá z okna prohlížeče.
 
-### 🪟 Windows (PowerShell nebo cmd)
+### 🪟 Windows (příkazový řádek `cmd`)
+
+Instalace / aktualizace + spuštění (skript se nejdřív stáhne do souboru a až pak spustí – žádné `| iex`):
 
 ```bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1 | iex"
+curl.exe -fsSL -o "%TEMP%\planovac_start.ps1" https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/start.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File "%TEMP%\planovac_start.ps1"
+```
+
+Spuštění bez aktualizace (už nainstalovaný program):
+
+```bat
+cd /d "%USERPROFILE%\PlanovacTrati" && run.bat
 ```
 
 ### 🐧 Linux / 🍎 macOS
@@ -51,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/Tomasraketak/PlanovacTrati/HEAD/sta
 - Program se uloží do `%USERPROFILE%\PlanovacTrati` (Windows) / `~/PlanovacTrati`; ten samý příkaz ho příště
   **aktualizuje a spustí** (knihovny se přeinstalují jen tehdy, když se změnily – další starty jsou rychlé).
 - **Spuštění bez aktualizace:** před příkaz nastavte `PLANOVAC_BEZ_AKTUALIZACE=1`
-  (Windows: `set PLANOVAC_BEZ_AKTUALIZACE=1 &&` před `powershell …`; Linux/macOS: `PLANOVAC_BEZ_AKTUALIZACE=1 curl … | bash`),
+  (Windows `cmd`: `set PLANOVAC_BEZ_AKTUALIZACE=1 && powershell …` za stažením skriptu, nebo prostě `run.bat`; Linux/macOS: `PLANOVAC_BEZ_AKTUALIZACE=1 curl … | bash`),
   nebo dvojklik na `run.bat` / `./run.sh` ve složce programu.
 - **Ovládání z GUI:** v levém panelu **⚙️ Aplikace** – kontrola a instalace aktualizací, restart, ukončení,
   smazání stažených dat, otevření složky výstupů. Po aktualizaci se aplikace sama restartuje.
