@@ -27,10 +27,13 @@ st.set_page_config(page_title="Plánovač tratí", page_icon="🚄", layout="wid
                    menu_items={"About": f"Plánovač tratí {__version__} – návrh osy VRT nad výškovým modelem a OSM."})
 
 diagnostika.zapni_faulthandler()
+diagnostika.hlidej_varovani()
 
 
 @st.cache_resource(show_spinner=False)
 def _log_port():
+    i = diagnostika.info()
+    diagnostika.zapis(f"start {__version__} · Python {i['python']} · Streamlit {i['streamlit']} · {i['os']}")
     return diagnostika.spust_server()
 
 
@@ -486,78 +489,56 @@ max. sklon {P.navrh.max_sklon_promile:g} ‰ · prodloužení max. {P.navrh.max_
 
 # =============================================================================== výpočet
 
-# Výpočet běží ve vlastním vlákně a průběh se jen čte z fragmentu. Dřív běžel přímo ve skriptu a zapisoval do
-# st.progress/st.status – když uživatel přepnul záložku prohlížeče, spojení se přerušilo a po návratu frontend
-# dostal změny pro prvky, které neměl („Bad delta path index“ → bílá obrazovka).
-def _spust_vypocet(projekt):
-    import threading
-    from planovac.pipeline import run_project
-
-    job = {"frac": 0.0, "msg": "Začínám …", "log": [], "res": None, "err": None, "tb": "", "done": False,
-           "t0": time.time(), "t1": None}
-
-    def cb(frac, msg):
-        job["frac"] = min(max(float(frac), 0.0), 1.0)
-        if msg != job["msg"] or not job["log"]:
-            job["log"].append(msg)
-        job["msg"] = msg
-
-    def beh():
-        try:
-            job["res"] = run_project(projekt, cb)
-        except Exception as e:                         # noqa: BLE001 – zobrazí se uživateli
-            import traceback
-
-            job["err"], job["tb"] = e, traceback.format_exc()
-            print(job["tb"])
-            diagnostika.zapis_vyjimku("výpočet trati")
-        finally:
-            job["t1"] = time.time()
-            job["done"] = True
-
-    threading.Thread(target=beh, daemon=True, name="planovac-vypocet").start()
-    return job
-
+# Výpočet běží v samostatném procesu (planovac/beh.py) a stránka jen jednou za sekundu přečte průběh. Ve vláknech
+# serveru bral výpočet serveru procesor, spojení s prohlížečem padalo a po přepnutí záložky zůstala bílá obrazovka.
+from planovac import beh
 
 if spustit:
     chyby = P.validate()
     if chyby:
         for ch in chyby:
             st.error(ch)
-    elif st.session_state.get("_job") and not st.session_state["_job"]["done"]:
+    elif (_u := beh.aktualni()) is not None and not _u.hotovo:
         st.warning("Výpočet už běží.")
     else:
-        st.session_state["_job"] = _spust_vypocet(copy.deepcopy(P))
+        beh.spust(copy.deepcopy(P))
 
 
-@st.fragment(run_every=1)
 def _prubeh_vypoctu():
-    job = st.session_state.get("_job")
-    if not job:
+    u = beh.aktualni()
+    if u is None:
         return
-    if job["done"]:
-        if job["err"] is None:
-            st.session_state.vysledek = job["res"]
+    if u.hotovo:
+        if u.chyba is None:
+            st.session_state.vysledek = u.vysledek
             st.session_state["karta"] = "🚄 Výsledek"
-            st.session_state["_job_hotovo"] = f"Hotovo za {job['t1'] - job['t0']:.0f} s ✅"
+            st.session_state["_job_hotovo"] = f"Hotovo za {u.t1 - u.t0:.0f} s ✅"
         else:
-            st.session_state["_job_chyba"] = (job["err"], job["tb"])
-        st.session_state["_job"] = None
+            st.session_state["_job_chyba"] = (u.chyba, u.tb)
+        beh.uvolni(u)
         st.rerun()
         return
-    st.progress(job["frac"], text=job["msg"])
-    with st.status(f"Navrhuji trať … ({time.time() - job['t0']:.0f} s)", expanded=True):
-        for m in job["log"][-12:]:
-            st.write(m)
+    # pevná struktura prvků (žádné přibývající řádky) – frontend dostává jen změny obsahu
+    st.progress(u.frac, text=u.msg)
+    with st.status(f"Navrhuji trať … ({time.time() - u.t0:.0f} s)", expanded=True):
+        st.code("\n".join(u.log[-12:]) or u.msg, language=None)
+        if st.button("⏹️ Zastavit výpočet"):
+            u.zastav()
 
 
-_prubeh_vypoctu()
+if beh.aktualni() is not None:
+    st.fragment(run_every=1)(_prubeh_vypoctu)()
 if st.session_state.get("_job_hotovo"):
     st.success(st.session_state.pop("_job_hotovo"))
 if st.session_state.get("_job_chyba"):
-    _e, _tb = st.session_state.pop("_job_chyba")
-    st.error("Výpočet selhal ❌")
-    st.exception(_e)
+    _chyba, _tb = st.session_state.pop("_job_chyba")
+    if _chyba == beh.ZASTAVENO:
+        st.info(f"⏹️ {_chyba}")
+    else:
+        st.error(f"Výpočet selhal ❌ {_chyba}")
+    if _tb:
+        with st.expander("Podrobnosti chyby"):
+            st.code(_tb, language=None)
 
 R = st.session_state.vysledek
 
