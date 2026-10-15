@@ -64,6 +64,8 @@ class NavrhoveParametry:
     polomer_zastavky_m: float = 800.0      # okruh kolem zastávky bez penalizace zástavby
     max_hloubka_stanice_m: float = 15.0    # stanice/zastávka smí být až tolik metrů pod terénem
     hloubka_tunelu_pod_mestem_m: float = 12.0  # min. hloubka nivelety pod ulicemi u tunelu pod zástavbou
+    zona_stanice_m: float = 1000.0         # do této vzdálenosti od stanice smí být menší oblouky (0 = vypnuto) …
+    rychlost_u_stanice_kmh: float = 50.0   # … až pro tuto rychlost; použije se, jen když varianta vyjde lépe
 
     def min_polomer(self) -> float:
         """Minimální poloměr oblouku R = 11,8·V² / (D + I)."""

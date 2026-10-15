@@ -201,9 +201,19 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
         o = fit(kor)
         return kor, o, var + o.varovani
 
-    def fit(kor, zony=None, ref_xy=None):
+    # zóna u stanic: vlak tu stejně brzdí / rozjíždí se, takže menší oblouk (až pro rychlost_u_stanice_kmh)
+    # stojí málo času a osa může sledovat koridor místo velkých oklik; použije se, jen když vyjde lépe
+    zona_st = None
+    if nav.zona_stanice_m > 0 and nav.rychlost_u_stanice_kmh > 0 and stanice_xy:
+        R_st = min(Rmin, omezeni.polomer_pro_rychlost(nav.rychlost_u_stanice_kmh, nav))
+        zona_st = (stanice_xy, nav.zona_stanice_m, R_st)
+    rezim = {"u_stanic": False}
+
+    def fit(kor, zony=None, ref_xy=None, u_stanic=None):
+        u = rezim["u_stanic"] if u_stanic is None else u_stanic
         return horizontal.fit_alignment(body_xy, je_stanice, [k.xy for k in kor], Rmin, Rpref, Lp=delky_nast,
-                                        tol=tol, ds=10.0, zony=zony, ref_xy=ref_xy, rmin_useky=rmin_useky)
+                                        tol=tol, ds=10.0, zony=zony, ref_xy=ref_xy, rmin_useky=rmin_useky,
+                                        stanice_zona=zona_st if u else None)
 
     def stavba_cs(s_tunelem: bool):
         """(základní, tunel pod městem | None) – náročné vrstvy se počítají jednou."""
@@ -343,6 +353,23 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
             porovnani_var.append(("Tunel pod městem", var_b_ev))
             if var_b_ev.J < var_a_ev.J - 1e-6:
                 vybrana, kor, cs, var_osa = var_b_ev, kor_b, cs_b, var_b
+        if zona_st is not None:
+            prog(0.75, f"Zkouším menší oblouky do {nav.zona_stanice_m:.0f} m od stanic "
+                       f"(až {nav.rychlost_u_stanice_kmh:.0f} km/h) …")
+            kand = [("Obchvat měst", osa_a, kor_a, cs_a, var_a)]
+            if osa_b is not None:
+                kand.append(("Tunel pod městem", osa_b, kor_b, cs_b, var_b))
+            for nm, o0, k_, c_, v_ in kand:
+                o_st = fit(k_, u_stanic=True)
+                if len(o_st.xy) == len(o0.xy) and np.allclose(o_st.xy, o0.xy):
+                    continue                      # u stanic nebylo co zlepšit
+                ev = vyhodnot(o_st)
+                porovnani_var.append((f"{nm} + menší oblouky u stanic", ev))
+                if ev.J < vybrana.J - 1e-6:
+                    vybrana, kor, cs = ev, k_, c_
+                    var_osa = [w for w in v_ if not w.startswith("Oblouk u vrcholu")] + o_st.varovani
+                    rezim["u_stanic"] = True
+        vybrana_varianta = vybrana               # pro tabulku variant (zpřesnění osy vytvoří nový objekt)
         r_zpres = project.koef.demolice_polomer_m
         if zpresnit:
             prog(0.76, "Zpřesňuji osu kolem budov …")
@@ -411,7 +438,7 @@ def run_project(project: Project, progress: Progress | None = None) -> Result:
     vystavba = (max(tun) / 1000 / (2 * project.ceny.rychlost_razeni_km_rok) + 1.0) if tun else 0.0
     varianty = [{"varianta": nm, "delka_km": v.osa.delka / 1000, "cena_mld": v.cena_mil / 1000,
                  "demolice": v.demolice, "jizdni_doba_s": v.jizdni_doba_s, "J_mld": v.J / 1000,
-                 "vybrana": v is zaklad} for nm, v in porovnani_var]
+                 "vybrana": v is vybrana_varianta} for nm, v in porovnani_var]
     prog(1.0, "Hotovo.")
     return Result(project=project, grid=grid, dem=z, cost=cs, osm=osm, body_xy=body_xy, koridory=koridory, osa=osa,
                   z_teren=z_ter, z_kolej=z_rail, analyza=an, rozpocet=rozp, jizda=jizda, vzdusna_m=vz,

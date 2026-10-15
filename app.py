@@ -191,6 +191,11 @@ with st.sidebar:
               "obejde, přejde násypem nebo zvolí jinou niveletu.")
             w(n, "hloubka_tunelu_min_m", "Ražený tunel od hloubky [m]", min_value=5.0, max_value=40.0, step=1.0)
             w(n, "min_delka_tunelu_m", "Min. délka raženého tunelu [m]", min_value=0.0, max_value=2000.0, step=50.0)
+            w(n, "zona_stanice_m", "Menší oblouky do vzdálenosti od stanice [m] (0 = vypnuto)", min_value=0.0,
+              max_value=5000.0, step=100.0, help="U stanic vlak stejně brzdí a rozjíždí se, takže menší oblouk "
+              "stojí málo času. Program spočítá variantu s menšími oblouky u stanic i bez nich a použije tu, "
+              "která vyjde lépe (cena + demolice + hodnota času).")
+            w(n, "rychlost_u_stanice_kmh", "…až pro rychlost [km/h]", min_value=30.0, max_value=200.0, step=10.0)
             w(n, "polomer_stanice_m", "Okruh kolem stanice bez penalizace zástavby [m]", min_value=0.0,
               max_value=6000.0, step=250.0)
 

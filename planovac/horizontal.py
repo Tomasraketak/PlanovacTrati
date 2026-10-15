@@ -69,7 +69,7 @@ def _unit(v):
     return v / n if n > 1e-12 else np.array([1.0, 0.0])
 
 
-def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref) -> list[_PI]:
+def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref, R_stanice=None) -> list[_PI]:
     n = len(points_xy)
     # 1) surová posloupnost vrcholů: (xy, index zadaného bodu nebo None)
     raw: list[tuple[np.ndarray, int | None]] = [(np.asarray(points_xy[0], float), 0)]
@@ -94,7 +94,8 @@ def _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref) -> list[_PI]:
         u = _unit(raw[k][0] - raw[k - 1][0])
         v = _unit(raw[k + 1][0] - raw[k][0])
         delta = np.arccos(np.clip(np.dot(u, v), -1, 1))
-        dist_D.append(half[j] + 1.2 * Rpref * np.tan(delta / 4) + 40.0)
+        R_j = min(Rpref, R_stanice) if (R_stanice and je_stanice[j]) else Rpref
+        dist_D.append(half[j] + 1.2 * R_j * np.tan(delta / 4) + 40.0)
     # 2) vrcholy uvnitř zóny mezilehlého bodu (nástupiště) zahodit
     keep_raw = []
     for xy, j in raw:
@@ -165,15 +166,19 @@ def _fit_radii(pis, Rmin, Rpref):
 
 def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=150.0, ds=10.0,
                   zony: list[tuple[float, float, float]] | None = None, ref_xy: np.ndarray | None = None,
-                  rmin_useky: list[float] | None = None) -> Alignment:
+                  rmin_useky: list[float] | None = None,
+                  stanice_zona: tuple[list, float, float] | None = None) -> Alignment:
     """Vloží přímé a oblouky do koridorů.
 
     ``rmin_useky`` – min. poloměr pro každý úsek mezi sousedními zadanými body (ručně snížená rychlost úseku);
     vrchol patří úseku, jehož koridor je mu nejblíž.
     ``zony`` – úseky se sníženou rychlostí [(s0, s1, Rmin_zóny)] ve staničení osy ``ref_xy``;
     vrcholy, které na ni padnou do zóny, smí mít oblouk až s poloměrem Rmin_zóny.
+    ``stanice_zona`` – (polohy stanic, vzdálenost, Rmin): vrcholy do této vzdálenosti od stanice smí mít oblouk
+    až s poloměrem Rmin (vlak tam stejně brzdí / rozjíždí se) a přímá u nástupiště se počítá pro tento poloměr.
     """
-    pis = _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref)
+    pis = _build_pis(points_xy, je_stanice, seg_paths, Lp, tol, Rpref,
+                     stanice_zona[2] if stanice_zona else None)
     varovani: list[str] = []
     # odstranit téměř přímé vrcholy
     if len(pis) > 2:
@@ -202,6 +207,16 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
             for s0, s1, rz in zony:
                 if s0 <= sp <= s1:
                     p.rmin = min(p.rmin, rz)
+
+    if stanice_zona:
+        st_xy, zona, R_st = stanice_zona
+        for p in pis:
+            if any(np.hypot(*(p.xy - np.asarray(q, float))) <= zona for q in st_xy):
+                p.rmin = min(p.rmin, R_st)
+    # vrcholy s lomem přes ~115° (vracení osy) – z nich by vznikla smyčka
+    if len(pis) > 2:
+        d0 = _deflections(pis)
+        pis = [p for k, p in enumerate(pis) if p.fixed or k in (0, len(pis) - 1) or d0[k] < 2.0]
 
     def rmin_arr():
         return np.array([p.rmin for p in pis])
@@ -233,6 +248,15 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
         q = min(cand, key=dev)
         pis.pop(q)
     R, delta = _fit_radii(pis, Rmin, Rpref)
+    # pojistka proti smyčce: dokud se osa kříží sama se sebou, odebírat volný vrchol s největším lomem
+    for _ in range(len(pis)):
+        if _bez_smycky(_generate(pis, R, delta, points_xy, max(ds, 20.0), []).xy):
+            break
+        volne = [k for k in range(1, len(pis) - 1) if not pis[k].fixed]
+        if not volne:
+            break
+        pis.pop(max(volne, key=lambda k: delta[k]))
+        R, delta = _fit_radii(pis, Rmin, Rpref)
     rm = rmin_arr()
     for k in range(1, len(pis) - 1):
         if delta[k] > 1e-6 and R[k] < rm[k] - 1e-6:
@@ -243,6 +267,13 @@ def fit_alignment(points_xy, je_stanice, seg_paths, Rmin, Rpref, Lp=400.0, tol=1
     al = _generate(pis, R, delta, points_xy, ds, varovani)
     al.pis, al.Rmin, al.Rpref = pis, Rmin, Rpref
     return al
+
+
+def _bez_smycky(xy: np.ndarray) -> bool:
+    """True, když se osa nikde nekříží sama se sebou."""
+    from shapely.geometry import LineString
+
+    return len(xy) < 4 or LineString(xy).is_simple
 
 
 def _generate(pis, R, delta, points_xy, ds, varovani) -> Alignment:
@@ -332,6 +363,8 @@ def zlepsi_osu(al: Alignment, points_xy, objective, ds: float = 10.0, offsets=(-
             if delta[k] > 1e-6 and R[k] < rm[k] - 1e-6:
                 poruseni += (rm[k] - R[k]) / rm[k]
         a = _generate(seznam, R, delta, points_xy, ds, [])
+        if not _bez_smycky(a.xy):
+            return np.inf, R, delta              # posun vrcholu nesmí vytvořit smyčku
         return float(objective(a.xy)) + 1e7 * poruseni, R, delta
 
     best, R0, d0 = hodnota(pis)
