@@ -80,14 +80,17 @@ _NEDOSTUPNY_DO = 0.0          # po úplném selhání všech serverů se Overpas
 JISTIC_S = 600.0
 
 
-def overpass(query: str, fmt: str = "json", progress: Progress | None = None, label: str = ""):
-    """Provede dotaz (s cache). ``fmt`` = 'json' nebo 'csv'."""
+def overpass(query: str, fmt: str = "json", progress: Progress | None = None, label: str = "",
+             jen_cache: bool = False):
+    """Provede dotaz (s cache). ``fmt`` = 'json' nebo 'csv'. ``jen_cache`` = bez sítě (chybí-li, OverpassError)."""
     global _NEDOSTUPNY_DO
     key = hashlib.sha1(query.encode("utf-8")).hexdigest()[:20]
     cfile = cache_dir("osm") / f"{key}.{fmt}"
     if cfile.exists():
         txt = cfile.read_text(encoding="utf-8")
         return json.loads(txt) if fmt == "json" else txt
+    if jen_cache:
+        raise OverpassError("není v cache")
 
     if ZDROJE_REZIM == "auto" and time.time() < _NEDOSTUPNY_DO:
         raise OverpassError(f"Overpass API nedostupné ({label}): přeskočeno po předchozím selhání")
@@ -378,52 +381,93 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
             math.ceil(bbox[2] * 10) / 10, math.ceil(bbox[3] * 10) / 10)
     osm = OsmData()
 
-    def safe(label, fn, zalozni=None):
-        """Overpass; při selhání (nebo v režimu „jen Overture“) záložní zdroj Overture Maps."""
-        chyba = None
-        if overpass_povolen():
-            try:
-                fn()
-                osm.zdroje[label] = "OSM (Overpass)"
-                return
-            except OverpassError as e:
-                chyba = e
-        if zalozni is not None and zalozni_povolen():
-            try:
-                zalozni(osm, bbox, progress)
-                osm.zdroje[label] = "Overture Maps"
-                if chyba:
-                    osm.varovani.append(f"Vrstva '{label}': Overpass nedostupný, použit záložní zdroj Overture Maps.")
-                return
-            except Exception as e2:        # noqa: BLE001 – chybu zdroje vždy převést na varování
-                chyba = chyba or e2
-                log.warning("Overture %s: %s", label, e2)
-        if chyba is not None:
-            osm.varovani.append(f"{chyba}. Vrstva '{label}' nebyla použita – zkuste výpočet později zopakovat.")
-            log.warning("%s", chyba)
+    tiles = dlazdice(bbox)
 
-    def zastavba():
-        data = overpass_dlazdice(lambda b: _q(
-            f'way["landuse"~"^(residential|industrial|commercial|retail|garages|farmyard)$"]{b};'
-            f'relation["landuse"~"^(residential|industrial|commercial|retail)$"]{b};'
-        ), bbox, progress, "zástavba")
-        osm.zastavba = [p for _, p in _polygons(data)]
+    def vrstva(label, dotaz, zpracuj, zalozni=None):
+        """Vrstva po dlaždicích. Pro každou dlaždici: cache Overpassu → cache Overture → Overpass → Overture.
 
-    def obce():
-        data = overpass_dlazdice(
-            lambda b: f'[out:json][timeout:120];node["place"~"^(city|town|village|hamlet)$"]{b};out qt;',
-            bbox, progress, "obce")
+        Co už jednou bylo staženo (z kteréhokoli zdroje), se nikdy nestahuje znovu; při výpadku serveru se
+        doplní jen chybějící dlaždice.
+        """
+        videno: set = set()
+        prvky: list = []
+        pouzito: set[str] = set()
+        chyby: list[str] = []
+        chybi = 0
+        lze_ov = zalozni is not None and zalozni_povolen()
+        ov_videno: set = set()
+
+        def ov(tb):
+            """Záložní zdroj pro jednu dlaždici; prvky přesahující do sousední dlaždice se nezdvojí."""
+            tmp = OsmData()
+            zalozni(tmp, tb, progress)
+            for atr in ("zastavba", "obce", "voda_plochy", "reky", "silnice", "zeleznice"):
+                for it in getattr(tmp, atr):
+                    g = it[-1] if isinstance(it, tuple) else it
+                    k = (atr, g.wkb)
+                    if k not in ov_videno:
+                        ov_videno.add(k)
+                        getattr(osm, atr).append(it)
+        for i, tb in enumerate(tiles):
+            q = dotaz(_bbox_str(tb))
+            lab = f"{label} {i + 1}/{len(tiles)}" if len(tiles) > 1 else label
+            data = None
+            if overpass_povolen():
+                try:
+                    data = overpass(q, jen_cache=True)
+                except OverpassError:
+                    pass
+            if data is None and lze_ov:
+                try:
+                    with zdroje.jen_z_cache():
+                        ov(tb)
+                    pouzito.add("Overture Maps")
+                    continue
+                except Exception:              # noqa: BLE001 – není v cache
+                    pass
+            if data is None and overpass_povolen():
+                try:
+                    data = overpass(q, progress=progress, label=lab)
+                except OverpassError as e:
+                    chyby.append(str(e))
+            if data is None and lze_ov:
+                try:
+                    ov(tb)
+                    pouzito.add("Overture Maps")
+                    continue
+                except Exception as e2:        # noqa: BLE001 – chybu zdroje vždy převést na varování
+                    chyby.append(str(e2))
+                    log.warning("Overture %s: %s", label, e2)
+            if data is None:
+                chybi += 1
+                continue
+            pouzito.add("OSM (Overpass)")
+            for el in data.get("elements", []):
+                k = (el.get("type"), el.get("id"))
+                if k in videno or not _v_obdelniku(el, bbox):
+                    continue
+                videno.add(k)
+                prvky.append(el)
+        zpracuj({"elements": prvky})
+        osm.zdroje[label] = " + ".join(sorted(pouzito)) or "nedostupné"
+        if chybi:
+            osm.varovani.append(f"{chyby[0] if chyby else 'Zdroj dat nedostupný'}. Vrstva '{label}': {chybi} z "
+                                f"{len(tiles)} částí území se nepodařilo stáhnout – zkuste výpočet později zopakovat "
+                                "(stažené části zůstávají v cache).")
+            log.warning("vrstva %s: %d dlaždic chybí", label, chybi)
+        elif chyby and "Overture Maps" in pouzito:
+            osm.varovani.append(f"Vrstva '{label}': Overpass nedostupný, část dat ze záložního zdroje Overture Maps.")
+
+    def zastavba(data):
+        osm.zastavba += [p for _, p in _polygons(data)]
+
+    def obce(data):
         for el in data.get("elements", []):
             name = el.get("tags", {}).get("name", "")
             x, y = to_xy(el["lon"], el["lat"])
             osm.obce.append((name, el["tags"].get("place", ""), Point(x, y)))
 
-    def voda():
-        data = overpass_dlazdice(lambda b: _q(
-            f'way["natural"="water"]{b};relation["natural"="water"]{b};'
-            f'way["landuse"="reservoir"]{b};way["waterway"~"^(river|canal)$"]{b};'
-        ), bbox, progress, "vodstvo")
-        polys = []
+    def voda(data):
         for el in data.get("elements", []):
             tags = el.get("tags", {})
             if el["type"] == "way" and tags.get("waterway"):
@@ -432,35 +476,36 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
             elif el["type"] == "way":
                 p = _way_polygon(el)
                 if p is not None and p.area > 2000:
-                    polys.append(p)
+                    osm.voda_plochy.append(p)
             else:
-                polys += [p for p in _relation_polygons(el) if p.area > 2000]
-        osm.voda_plochy = polys
+                osm.voda_plochy += [p for p in _relation_polygons(el) if p.area > 2000]
 
-    def doprava():
-        data = overpass_dlazdice(lambda b: _q(
-            f'way["highway"~"^(motorway|trunk|primary|secondary)$"]{b};way["railway"="rail"]["service"!~"."]{b};'
-        ), bbox, progress, "silnice a železnice")
+    def doprava(data):
         for tags, ls in _lines(data):
             if tags.get("railway") == "rail":
                 osm.zeleznice.append(ls)
             else:
                 osm.silnice.append((tags.get("highway", ""), tags.get("ref", tags.get("name", "")), ls))
 
-    def chranena_uzemi():
-        data = overpass_dlazdice(lambda b: _q(
-            f'relation["boundary"~"^(protected_area|national_park)$"]{b};way["boundary"="protected_area"]{b};'
-            f'relation["leisure"="nature_reserve"]{b};way["leisure"="nature_reserve"]{b};'
-        ), bbox, progress, "chráněná území")
+    def chranena_uzemi(data):
         for tags, p in _polygons(data):
             osm.chranena.append((tags.get("name", "chráněné území"), _protect_level(tags), p))
 
-    safe("zástavba", zastavba, _ov_zastavba)
-    safe("obce", obce, _ov_obce)
-    safe("vodstvo", voda, _ov_voda)
-    safe("doprava", doprava, _ov_doprava)
+    vrstva("zástavba", lambda b: _q(
+        f'way["landuse"~"^(residential|industrial|commercial|retail|garages|farmyard)$"]{b};'
+        f'relation["landuse"~"^(residential|industrial|commercial|retail)$"]{b};'), zastavba, _ov_zastavba)
+    vrstva("obce", lambda b: f'[out:json][timeout:120];node["place"~"^(city|town|village|hamlet)$"]{b};out qt;',
+           obce, _ov_obce)
+    vrstva("vodstvo", lambda b: _q(
+        f'way["natural"="water"]{b};relation["natural"="water"]{b};'
+        f'way["landuse"="reservoir"]{b};way["waterway"~"^(river|canal)$"]{b};'), voda, _ov_voda)
+    vrstva("doprava", lambda b: _q(
+        f'way["highway"~"^(motorway|trunk|primary|secondary)$"]{b};way["railway"="rail"]["service"!~"."]{b};'),
+        doprava, _ov_doprava)
     if chranena:
-        safe("chráněná území", chranena_uzemi)
+        vrstva("chráněná území", lambda b: _q(
+            f'relation["boundary"~"^(protected_area|national_park)$"]{b};way["boundary"="protected_area"]{b};'
+            f'relation["leisure"="nature_reserve"]{b};way["leisure"="nature_reserve"]{b};'), chranena_uzemi)
     if budovy:
         try:
             osm.budovy = fetch_buildings_bbox(bbox, progress)
@@ -471,6 +516,18 @@ def fetch_area(bbox, budovy: bool = True, chranena: bool = True, progress: Progr
 
 
 def _budovy_dlazdice(q: str, tb, progress, label: str) -> np.ndarray:
+    """Středy budov v dlaždici: cache Overpassu → cache Overture → Overpass → Overture."""
+    if overpass_povolen():
+        try:
+            return _csv_points(overpass(q, fmt="csv", jen_cache=True))
+        except OverpassError:
+            pass
+    if zalozni_povolen():
+        try:
+            with zdroje.jen_z_cache():
+                return _ov_budovy(tb, progress)
+        except Exception:                  # noqa: BLE001 – není v cache
+            pass
     chyba = None
     if overpass_povolen():
         try:
@@ -503,55 +560,87 @@ def fetch_buildings_bbox(bbox, progress: Progress | None = None, tile_deg: float
     return pts
 
 
-def _fetch_poly(poly_lonlat, progress, label="budovy v koridoru") -> np.ndarray:
-    coords = " ".join(f"{lat:.5f} {lon:.5f}" for lon, lat in poly_lonlat)
-    q = f'[out:csv(::lat,::lon;false)][timeout:180];way["building"](poly:"{coords}");out center qt;'
-    lo = [p[0] for p in poly_lonlat]
-    la = [p[1] for p in poly_lonlat]
-    return _budovy_dlazdice(q, (min(lo), min(la), max(lo), max(la)), progress, label)
+BUDOVY_DEG = 0.05        # dlaždice budov v koridoru (~3,6 × 5,5 km) – pevná mřížka, aby se daly znovu použít
+
+
+def _bud_dotaz(tb) -> str:
+    return f'[out:csv(::lat,::lon;false)][timeout:180];way["building"]{_bbox_str(tb)};out center qt;'
 
 
 def fetch_buildings_corridor(poly_lonlat: list[tuple[float, float]], progress: Progress | None = None) -> np.ndarray:
     """Středy budov uvnitř polygonu koridoru (lon, lat).
 
-    Stažené budovy a pokrytá území se ukládají do ``data/cache/osm/budovy_store.npz``; při dalším
-    výpočtu se ze serveru stahuje jen část polygonu, která ještě pokrytá není.
+    Budovy se stahují po pevných dlaždicích ``BUDOVY_DEG``; stažené dlaždice a budovy se ukládají do
+    ``data/cache/osm/budovy_store.npz``. Při posunu trasy se stahují jen dlaždice, které ještě nikdy staženy
+    nebyly – ne úzké pruhy podél nového koridoru.
     """
     import shapely
-    from shapely.geometry import Polygon
+    from shapely.geometry import Polygon, box
 
     lon = np.array([p[0] for p in poly_lonlat])
     lat = np.array([p[1] for p in poly_lonlat])
     x, y = to_xy(lon, lat)
     poly = Polygon(np.column_stack([x, y])).buffer(0)
+    poly_ll = Polygon(np.column_stack([lon, lat])).buffer(0)
     store = cache_dir("osm") / "budovy_store.npz"
     body = np.zeros((0, 2))
-    pokryto = None
+    hotove: set[str] = set()
+    pokryto = None                      # starší formát úložiště: pokryté území (polygon v metrech)
     if store.exists():
         try:
             d = np.load(store, allow_pickle=False)
             body = d["body"]
-            pokryto = shapely.from_wkb(bytes(d["pokryto"]))
+            if "dlazdice" in d:
+                hotove = set(str(k) for k in d["dlazdice"])
+            if "pokryto" in d:
+                pokryto = shapely.from_wkb(bytes(d["pokryto"]))
         except Exception:
-            body, pokryto = np.zeros((0, 2)), None
-    chybi = poly if pokryto is None else poly.difference(pokryto.buffer(-1))
-    casti = [g for g in getattr(chybi, "geoms", [chybi]) if not g.is_empty and g.area > 2e4]
+            body, hotove, pokryto = np.zeros((0, 2)), set(), None
+
+    def klic(tb):
+        return f"{tb[0]:.3f},{tb[1]:.3f}"
+
+    tiles = [tb for tb in dlazdice(poly_ll.bounds, BUDOVY_DEG) if box(*tb).intersects(poly_ll)]
+    chybi = []
+    for tb in tiles:
+        if klic(tb) in hotove:
+            continue
+        if pokryto is not None:         # dlaždice celá v dříve staženém území → hotová (přechod ze starého formátu)
+            cx, cy = to_xy(np.array([tb[0], tb[2], tb[2], tb[0]]), np.array([tb[1], tb[1], tb[3], tb[3]]))
+            if pokryto.buffer(1).contains(Polygon(np.column_stack([cx, cy]))):
+                hotove.add(klic(tb))
+                continue
+        chybi.append(tb)
+
+    def uloz(b):
+        np.savez_compressed(store, body=b, dlazdice=np.array(sorted(hotove)),
+                            **({"pokryto": np.frombuffer(shapely.to_wkb(pokryto), dtype=np.uint8)}
+                               if pokryto is not None else {}))
+
     selhalo: list[str] = []
-    for i, g in enumerate(casti):
-        g = g.simplify(30).buffer(20)
-        ex = np.array(g.exterior.coords)
-        glon, glat = to_lonlat(ex[:, 0], ex[:, 1])
+    nove_casti: list[np.ndarray] = []
+    for i, tb in enumerate(chybi):
         try:
-            nove = _fetch_poly(list(zip(glon, glat)), progress, f"budovy v koridoru {i + 1}/{len(casti)}")
-        except OverpassError as e:       # část se nepodařila → nepovažovat za pokrytou, pokračovat dál
+            nove = _budovy_dlazdice(_bud_dotaz(tb), tb, progress, f"budovy v koridoru {i + 1}/{len(chybi)}")
+        except OverpassError as e:       # dlaždice se nepodařila → příště se zkusí znovu, pokračovat dál
             selhalo.append(str(e))
             continue
-        body = np.unique(np.vstack([body, nove]).round(1), axis=0) if len(nove) else body
-        pokryto = g if pokryto is None else pokryto.union(g)
-        np.savez_compressed(store, body=body, pokryto=np.frombuffer(shapely.to_wkb(pokryto), dtype=np.uint8))
+        if len(nove):
+            nove_casti.append(nove)
+        hotove.add(klic(tb))
+        if (i + 1) % 10 == 0 or i == len(chybi) - 1:    # průběžně ukládat (přerušený výpočet o nic nepřijde)
+            if nove_casti:
+                body = np.unique(np.vstack([body] + nove_casti).round(1), axis=0)
+                nove_casti = []
+            uloz(body)
+    if nove_casti:
+        body = np.unique(np.vstack([body] + nove_casti).round(1), axis=0)
+        uloz(body)
+    elif chybi and not selhalo:
+        uloz(body)
     if selhalo and progress:
         progress(f"Část budov se nepodařilo stáhnout ({len(selhalo)}×), výpočet pokračuje s tím, co je k dispozici.")
-    if selhalo and len(casti) == len(selhalo) and len(body) == 0:
+    if selhalo and len(chybi) == len(selhalo) and len(body) == 0:
         raise OverpassError(selhalo[0])
     if len(body) == 0:
         return body

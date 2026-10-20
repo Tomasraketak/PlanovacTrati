@@ -17,6 +17,8 @@ def _selze(*a, **k):
 
 
 def _falesne_geometrie(theme, typ, bbox, sloupce, progress=None):
+    if getattr(zdroje._rezim, "jen_cache", False):      # v cache nic není → stahovat
+        raise zdroje.ZdrojError("není v cache")
     if typ == "land_use":
         return [({"class": "residential", "subtype": "developed"}, Polygon([(14.7, 49.0), (14.71, 49.0), (14.71, 49.01), (14.7, 49.01)]))]
     if typ == "division":
@@ -31,6 +33,8 @@ def _falesne_geometrie(theme, typ, bbox, sloupce, progress=None):
 
 
 def _budovy(bbox, progress=None):
+    if getattr(zdroje._rezim, "jen_cache", False):
+        raise zdroje.ZdrojError("není v cache")
     p = np.array([[14.75, 49.0], [14.76, 49.0]])
     w, s, e, n = bbox
     return p[(p[:, 0] >= w) & (p[:, 0] < e) & (p[:, 1] >= s) & (p[:, 1] < n)]

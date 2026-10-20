@@ -160,6 +160,18 @@ def _stat_soubor(klic: str) -> list[list[float]]:
 
 
 _zamek = threading.Lock()
+_rezim = threading.local()
+
+
+class jen_z_cache:
+    """``with zdroje.jen_z_cache(): ...`` – čte jen to, co už je na disku; jinak ``ZdrojError`` (bez sítě)."""
+
+    def __enter__(self):
+        self._puvodni = getattr(_rezim, "jen_cache", False)
+        _rezim.jen_cache = True
+
+    def __exit__(self, *a):
+        _rezim.jen_cache = self._puvodni
 
 
 def _index(theme: str, typ: str, rel: str, progress: Progress | None) -> dict[str, list[list[float]]]:
@@ -223,6 +235,8 @@ def cti(theme: str, typ: str, bbox, sloupce: list[str], progress: Progress | Non
             return pq.read_table(cf)
         except Exception:
             pass
+    if getattr(_rezim, "jen_cache", False):
+        raise ZdrojError("Overture Maps: oblast není v cache")
     rel = vydani()
     idx = _index(theme, typ, rel, progress)
     ukoly = [(k, g) for k, rgs in idx.items() for g, st in enumerate(rgs)

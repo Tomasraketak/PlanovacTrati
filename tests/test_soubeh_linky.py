@@ -82,12 +82,19 @@ def test_uloziste_budov_nestahuje_znovu(tmp_path, monkeypatch):
     monkeypatch.setenv("PLANOVAC_DATA", str(tmp_path))
     volani = []
 
-    def fake(poly, progress, label=""):
-        volani.append(label)
+    def fake(q, tb, progress, label=""):
+        volani.append(tb)
         return np.zeros((0, 2))
 
-    monkeypatch.setattr(o, "_fetch_poly", fake)
+    monkeypatch.setattr(o, "_budovy_dlazdice", fake)
     poly = [(14.5, 49.0), (14.6, 49.0), (14.6, 49.05), (14.5, 49.05), (14.5, 49.0)]
     o.fetch_buildings_corridor(poly)
+    n1 = len(volani)
+    assert n1 > 0
     o.fetch_buildings_corridor(poly)
-    assert len(volani) == 1
+    assert len(volani) == n1                       # stejný koridor → nic se nestahuje
+    # mírně posunutý koridor → jen dlaždice, které přibyly (žádné úzké pruhy podél okraje)
+    posun = [(lo + 0.01, la + 0.003) for lo, la in poly]
+    o.fetch_buildings_corridor(posun)
+    nove = volani[n1:]
+    assert nove and not set(nove) & set(volani[:n1])     # nic už staženého se nestahuje znovu

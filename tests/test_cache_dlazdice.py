@@ -33,3 +33,32 @@ def test_posunuta_oblast_stahuje_jen_nove_dlazdice(tmp_path, monkeypatch):
     monkeypatch.setattr(osm, "overpass", lambda q, **k: dotazy2.append(q) or {"elements": []})
     osm.overpass_dlazdice(lambda b: f"dotaz{b}", (15.40, 49.25, 15.60, 49.30))
     assert set(dotazy2) <= set(dotazy)
+
+
+def test_cache_ma_prednost_pred_siti(tmp_path, monkeypatch):
+    """Dlaždice stažená dříve ze záložního zdroje se při dalším běhu nestahuje znovu z Overpassu."""
+    from planovac import zdroje
+    monkeypatch.setenv("PLANOVAC_DATA", str(tmp_path))
+    sit = []
+
+    def overpass(q, fmt="json", progress=None, label="", jen_cache=False):
+        if jen_cache:
+            raise osm.OverpassError("není v cache")
+        sit.append(q)
+        raise osm.OverpassError("server nedostupný")
+
+    v_cache = {"ano": False}
+
+    def geometrie(theme, typ, bbox, sloupce, progress=None):
+        if getattr(zdroje._rezim, "jen_cache", False) and not v_cache["ano"]:
+            raise zdroje.ZdrojError("není v cache")
+        return []
+
+    monkeypatch.setattr(osm, "overpass", overpass)
+    monkeypatch.setattr(zdroje, "geometrie", geometrie)
+    osm.fetch_area((14.6, 48.9, 14.9, 49.1), budovy=False, chranena=False)
+    assert sit                                     # 1. běh: Overpass selže → Overture ze sítě
+    sit.clear()
+    v_cache["ano"] = True                          # Overture data jsou teď na disku
+    o = osm.fetch_area((14.6, 48.9, 14.9, 49.1), budovy=False, chranena=False)
+    assert not sit and o.zdroje["zástavba"] == "Overture Maps"
